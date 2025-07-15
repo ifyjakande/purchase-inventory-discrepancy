@@ -69,6 +69,9 @@ class DiscrepancyAnalyzer:
         # Convert date column to datetime
         purchase_df['DATE'] = pd.to_datetime(purchase_df['DATE'])
         
+        # Strip whitespace from purchase officer names
+        purchase_df['PURCHASE OFFICER NAME'] = purchase_df['PURCHASE OFFICER NAME'].str.strip()
+        
         # Group by date and purchase officer, sum the metrics
         grouped = purchase_df.groupby(['DATE', 'PURCHASE OFFICER NAME']).agg({
             'NUMBER OF BIRDS': 'sum',
@@ -86,6 +89,9 @@ class DiscrepancyAnalyzer:
         
         # Convert date column to datetime
         inventory_df['DATE'] = pd.to_datetime(inventory_df['DATE'])
+        
+        # Strip whitespace from purchase officer names
+        inventory_df['PURCHASE OFFICER NAME'] = inventory_df['PURCHASE OFFICER NAME'].str.strip()
         
         # Split comma-separated invoice numbers (handle various spacing patterns)
         def split_invoices(invoice_str):
