@@ -347,8 +347,37 @@ class DiscrepancyAnalyzer:
             # Customize columns for the specific sheet
             df_copy = self._customize_columns_for_sheet(df_copy, sheet_type)
             
-            # Clear the worksheet
+            # Clear the worksheet content and formatting
             worksheet.clear()
+            
+            # Clear all formatting by applying default formatting to the entire sheet
+            try:
+                worksheet.spreadsheet.batch_update({
+                    'requests': [{
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet.id,
+                                'startRowIndex': 0,
+                                'endRowIndex': 1000,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': 50
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': False
+                                    },
+                                    'horizontalAlignment': 'LEFT'
+                                }
+                            },
+                            'fields': 'userEnteredFormat'
+                        }
+                    }]
+                })
+            except Exception as e:
+                print(f"Warning: Could not clear formatting: {e}")
             
             # Prepare data with title
             data_to_write = []
@@ -486,29 +515,6 @@ class DiscrepancyAnalyzer:
             
             # Prepare batch update requests
             requests = []
-            
-            # Clear all existing formatting first by applying default formatting to all data rows
-            requests.append({
-                'repeatCell': {
-                    'range': {
-                        'sheetId': worksheet_id,
-                        'startRowIndex': 3,  # Start from data rows
-                        'endRowIndex': 3 + len(df),  # Cover all data rows
-                        'startColumnIndex': 0,
-                        'endColumnIndex': len(df.columns)
-                    },
-                    'cell': {
-                        'userEnteredFormat': {
-                            'backgroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},  # White background
-                            'textFormat': {
-                                'fontSize': 10
-                            },
-                            'horizontalAlignment': 'CENTER'
-                        }
-                    },
-                    'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                }
-            })
             
             # Format title row (A1)
             requests.append({
