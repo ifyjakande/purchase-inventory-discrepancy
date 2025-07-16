@@ -487,6 +487,29 @@ class DiscrepancyAnalyzer:
             # Prepare batch update requests
             requests = []
             
+            # Clear all existing formatting first by applying default formatting to all data rows
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': worksheet_id,
+                        'startRowIndex': 3,  # Start from data rows
+                        'endRowIndex': 3 + len(df),  # Cover all data rows
+                        'startColumnIndex': 0,
+                        'endColumnIndex': len(df.columns)
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'backgroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},  # White background
+                            'textFormat': {
+                                'fontSize': 10
+                            },
+                            'horizontalAlignment': 'CENTER'
+                        }
+                    },
+                    'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                }
+            })
+            
             # Format title row (A1)
             requests.append({
                 'repeatCell': {
