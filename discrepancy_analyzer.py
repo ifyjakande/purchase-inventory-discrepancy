@@ -469,13 +469,13 @@ class DiscrepancyAnalyzer:
             'Inventory Birds Total': f"{total_i_birds:,.0f}",
             'Birds Difference': f"{total_birds_diff:,.0f}",
             'Birds Percentage Difference': f"{total_birds_pct}%",
-            'Purchase Chicken Weight Total': f"{total_p_chicken:,.2f}",
-            'Inventory Chicken Weight Total': f"{total_i_chicken:,.2f}",
-            'Chicken Weight Difference': f"{total_chicken_diff:,.2f}",
+            'Purchase Chicken Weight Total': f"{total_p_chicken:,.2f} kg",
+            'Inventory Chicken Weight Total': f"{total_i_chicken:,.2f} kg",
+            'Chicken Weight Difference': f"{total_chicken_diff:,.2f} kg",
             'Chicken Weight Percentage Difference': f"{total_chicken_pct}%",
-            'Purchase Gizzard Weight Total': f"{total_p_gizzard:,.2f}",
-            'Inventory Gizzard Weight Total': f"{total_i_gizzard:,.2f}",
-            'Gizzard Weight Difference': f"{total_gizzard_diff:,.2f}",
+            'Purchase Gizzard Weight Total': f"{total_p_gizzard:,.2f} kg",
+            'Inventory Gizzard Weight Total': f"{total_i_gizzard:,.2f} kg",
+            'Gizzard Weight Difference': f"{total_gizzard_diff:,.2f} kg",
             'Gizzard Weight Percentage Difference': f"{total_gizzard_pct}%"
         }
     
