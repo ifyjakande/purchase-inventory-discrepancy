@@ -685,6 +685,9 @@ class DiscrepancyAnalyzer:
     def _preserve_existing_data(self, worksheet, new_df, sheet_type):
         """Preserve existing comments and resolution data"""
         try:
+            # Skip preservation for monthly summary reports - they're pure calculations
+            if sheet_type == 'summary':
+                return new_df
             # Read existing data using get_all_values to handle duplicate headers
             all_values = worksheet.get_all_values()
             if len(all_values) <= 3:  # No data rows
@@ -702,11 +705,22 @@ class DiscrepancyAnalyzer:
             
             # Create lookup for existing data
             for idx, new_row in new_df.iterrows():
-                # Create unique key for matching
-                key_match = existing_df[
-                    (existing_df['Date'] == new_row['Date']) & 
-                    (existing_df['Purchase Officer'] == new_row['Purchase Officer'])
-                ]
+                # Create unique key for matching based on available columns
+                if 'Date' in existing_df.columns and 'Date' in new_df.columns:
+                    # For discrepancy reports (Weight/Invoice)
+                    key_match = existing_df[
+                        (existing_df['Date'] == new_row['Date']) & 
+                        (existing_df['Purchase Officer'] == new_row['Purchase Officer'])
+                    ]
+                elif 'Month' in existing_df.columns and 'Month' in new_df.columns:
+                    # For monthly summary reports
+                    key_match = existing_df[
+                        (existing_df['Month'] == new_row['Month']) & 
+                        (existing_df['Purchase Officer'] == new_row['Purchase Officer'])
+                    ]
+                else:
+                    # Skip if no matching key columns found
+                    continue
                 
                 if not key_match.empty:
                     existing_row = key_match.iloc[0]
