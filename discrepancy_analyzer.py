@@ -462,6 +462,15 @@ class DiscrepancyAnalyzer:
         total_chicken_pct = round((total_chicken_diff / total_p_chicken) * 100, 2) if total_p_chicken > 0 else 0
         total_gizzard_pct = round((total_gizzard_diff / total_p_gizzard) * 100, 2) if total_p_gizzard > 0 else 0
         
+        # Helper function to format weight with appropriate unit
+        def format_weight(weight):
+            if abs(weight) >= 1000:
+                tonnes_value = weight / 1000
+                unit = "tonne" if abs(tonnes_value) == 1.00 else "tonnes"
+                return f"{tonnes_value:,.2f} {unit}"
+            else:
+                return f"{weight:,.2f} kg"
+        
         return {
             'Month': '',
             'Purchase Officer': '═══════ GRAND TOTALS ═══════',
@@ -469,13 +478,13 @@ class DiscrepancyAnalyzer:
             'Inventory Birds Total': f"{total_i_birds:,.0f}",
             'Birds Difference': f"{total_birds_diff:,.0f}",
             'Birds Percentage Difference': f"{total_birds_pct}%",
-            'Purchase Chicken Weight Total': f"{total_p_chicken:,.2f} kg",
-            'Inventory Chicken Weight Total': f"{total_i_chicken:,.2f} kg",
-            'Chicken Weight Difference': f"{total_chicken_diff:,.2f} kg",
+            'Purchase Chicken Weight Total': format_weight(total_p_chicken),
+            'Inventory Chicken Weight Total': format_weight(total_i_chicken),
+            'Chicken Weight Difference': format_weight(total_chicken_diff),
             'Chicken Weight Percentage Difference': f"{total_chicken_pct}%",
-            'Purchase Gizzard Weight Total': f"{total_p_gizzard:,.2f} kg",
-            'Inventory Gizzard Weight Total': f"{total_i_gizzard:,.2f} kg",
-            'Gizzard Weight Difference': f"{total_gizzard_diff:,.2f} kg",
+            'Purchase Gizzard Weight Total': format_weight(total_p_gizzard),
+            'Inventory Gizzard Weight Total': format_weight(total_i_gizzard),
+            'Gizzard Weight Difference': format_weight(total_gizzard_diff),
             'Gizzard Weight Percentage Difference': f"{total_gizzard_pct}%"
         }
     
