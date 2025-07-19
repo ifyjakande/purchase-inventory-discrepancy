@@ -502,10 +502,29 @@ class DiscrepancyAnalyzer:
             ('Gizzard', 'Gizzard Weight Percentage Difference_numeric')
         ]
         
+        # Add spacing rows before performance analysis
+        for i in range(2):
+            analysis_rows.append({
+                'Month': '',
+                'Purchase Officer': '',
+                'Purchase Birds Total': '',
+                'Inventory Birds Total': '',
+                'Birds Difference': '',
+                'Birds Percentage Difference': '',
+                'Purchase Chicken Weight Total': '',
+                'Inventory Chicken Weight Total': '',
+                'Chicken Weight Difference': '',
+                'Chicken Weight Percentage Difference': '',
+                'Purchase Gizzard Weight Total': '',
+                'Inventory Gizzard Weight Total': '',
+                'Gizzard Weight Difference': '',
+                'Gizzard Weight Percentage Difference': ''
+            })
+        
         # Add separator row
         analysis_rows.append({
             'Month': '',
-            'Purchase Officer': '═══════ PERFORMANCE ANALYSIS ═══════',
+            'Purchase Officer': '📊 PERFORMANCE ANALYSIS',
             'Purchase Birds Total': '',
             'Inventory Birds Total': '',
             'Birds Difference': '',
@@ -532,7 +551,7 @@ class DiscrepancyAnalyzer:
             # Add best performer row
             analysis_rows.append({
                 'Month': '',
-                'Purchase Officer': f'🏆 BEST {category_name.upper()}: {best_officer}',
+                'Purchase Officer': f'🥇 BEST {category_name.upper()} ACCURACY: {best_officer}',
                 'Purchase Birds Total': '',
                 'Inventory Birds Total': '',
                 'Birds Difference': '',
@@ -550,7 +569,7 @@ class DiscrepancyAnalyzer:
             # Add worst performer row
             analysis_rows.append({
                 'Month': '',
-                'Purchase Officer': f'⚠️ WORST {category_name.upper()}: {worst_officer}',
+                'Purchase Officer': f'🔴 NEEDS IMPROVEMENT - {category_name.upper()}: {worst_officer}',
                 'Purchase Birds Total': '',
                 'Inventory Birds Total': '',
                 'Birds Difference': '',
@@ -926,15 +945,16 @@ class DiscrepancyAnalyzer:
         try:
             # Enhanced color palette for monthly summary
             summary_colors = {
-                'purchase_total': {'red': 0.85, 'green': 0.95, 'blue': 1.0},  # Light blue
-                'inventory_total': {'red': 0.95, 'green': 1.0, 'blue': 0.85},  # Light green
-                'difference_positive': {'red': 1.0, 'green': 0.9, 'blue': 0.9},  # Light red
-                'difference_negative': {'red': 0.9, 'green': 1.0, 'blue': 0.9},  # Light green
-                'percentage_high': {'red': 1.0, 'green': 0.7, 'blue': 0.7},  # Red for high discrepancy
-                'percentage_low': {'red': 0.7, 'green': 1.0, 'blue': 0.7},  # Green for low discrepancy
-                'analysis_header': {'red': 0.3, 'green': 0.2, 'blue': 0.7},  # Purple
-                'best_performer': {'red': 0.7, 'green': 1.0, 'blue': 0.7},  # Bright green
-                'worst_performer': {'red': 1.0, 'green': 0.7, 'blue': 0.7}  # Bright red
+                'purchase_total': {'red': 0.90, 'green': 0.95, 'blue': 1.0},  # Very light blue
+                'inventory_total': {'red': 0.95, 'green': 1.0, 'blue': 0.90},  # Very light green
+                'difference_positive': {'red': 1.0, 'green': 0.85, 'blue': 0.85},  # Light coral
+                'difference_negative': {'red': 0.85, 'green': 1.0, 'blue': 0.85},  # Light mint
+                'percentage_high': {'red': 0.95, 'green': 0.6, 'blue': 0.6},  # Soft red
+                'percentage_low': {'red': 0.6, 'green': 0.95, 'blue': 0.6},  # Soft green
+                'analysis_header': {'red': 0.2, 'green': 0.4, 'blue': 0.8},  # Professional blue
+                'best_performer': {'red': 0.1, 'green': 0.7, 'blue': 0.1},  # Success green
+                'worst_performer': {'red': 0.9, 'green': 0.3, 'blue': 0.3},  # Alert red
+                'spacing_row': {'red': 1.0, 'green': 1.0, 'blue': 1.0}  # White for spacing
             }
             
             # Get column indices for different types
@@ -988,7 +1008,7 @@ class DiscrepancyAnalyzer:
                                     'backgroundColor': summary_colors['analysis_header'],
                                     'textFormat': {
                                         'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
-                                        'fontSize': 12,
+                                        'fontSize': 14,
                                         'bold': True
                                     },
                                     'horizontalAlignment': 'CENTER'
@@ -997,7 +1017,7 @@ class DiscrepancyAnalyzer:
                             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                         }
                     })
-                elif 'BEST' in officer_name:
+                elif 'BEST' in officer_name or 'ACCURACY' in officer_name:
                     # Best performer row
                     requests.append({
                         'repeatCell': {
@@ -1012,17 +1032,18 @@ class DiscrepancyAnalyzer:
                                 'userEnteredFormat': {
                                     'backgroundColor': summary_colors['best_performer'],
                                     'textFormat': {
+                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
                                         'fontSize': 11,
                                         'bold': True
                                     },
-                                    'horizontalAlignment': 'CENTER'
+                                    'horizontalAlignment': 'LEFT'
                                 }
                             },
                             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                         }
                     })
-                elif 'WORST' in officer_name:
-                    # Worst performer row
+                elif 'NEEDS IMPROVEMENT' in officer_name or 'WORST' in officer_name:
+                    # Needs improvement row
                     requests.append({
                         'repeatCell': {
                             'range': {
@@ -1036,13 +1057,33 @@ class DiscrepancyAnalyzer:
                                 'userEnteredFormat': {
                                     'backgroundColor': summary_colors['worst_performer'],
                                     'textFormat': {
+                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
                                         'fontSize': 11,
                                         'bold': True
                                     },
-                                    'horizontalAlignment': 'CENTER'
+                                    'horizontalAlignment': 'LEFT'
                                 }
                             },
                             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif officer_name == '':
+                    # Spacing row - keep white/transparent
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': summary_colors['spacing_row']
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor)'
                         }
                     })
                 else:
