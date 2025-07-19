@@ -943,17 +943,17 @@ class DiscrepancyAnalyzer:
     def _apply_monthly_summary_formatting(self, worksheet_id, df, requests, colors):
         """Apply colorful formatting specific to monthly summary report"""
         try:
-            # Enhanced color palette for monthly summary
+            # Enhanced color palette for monthly summary - light and easy on eyes
             summary_colors = {
-                'purchase_total': {'red': 0.90, 'green': 0.95, 'blue': 1.0},  # Very light blue
-                'inventory_total': {'red': 0.95, 'green': 1.0, 'blue': 0.90},  # Very light green
-                'difference_positive': {'red': 1.0, 'green': 0.85, 'blue': 0.85},  # Light coral
-                'difference_negative': {'red': 0.85, 'green': 1.0, 'blue': 0.85},  # Light mint
-                'percentage_high': {'red': 0.95, 'green': 0.6, 'blue': 0.6},  # Soft red
-                'percentage_low': {'red': 0.6, 'green': 0.95, 'blue': 0.6},  # Soft green
-                'analysis_header': {'red': 0.2, 'green': 0.4, 'blue': 0.8},  # Professional blue
-                'best_performer': {'red': 0.1, 'green': 0.7, 'blue': 0.1},  # Success green
-                'worst_performer': {'red': 0.9, 'green': 0.3, 'blue': 0.3},  # Alert red
+                'purchase_total': {'red': 0.91, 'green': 0.96, 'blue': 0.99},  # Very light blue (same as weight report)
+                'inventory_total': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (same as weight report)
+                'difference_positive': {'red': 1.0, 'green': 0.95, 'blue': 0.91},  # Very light orange (same as weight report)
+                'difference_negative': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (same as weight report)
+                'percentage_high': {'red': 1.0, 'green': 0.91, 'blue': 0.91},  # Very light red (same as weight report)
+                'percentage_low': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (same as weight report)
+                'analysis_header': {'red': 0.91, 'green': 0.96, 'blue': 0.99},  # Very light blue (same as header)
+                'best_performer': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (gentle)
+                'worst_performer': {'red': 1.0, 'green': 0.95, 'blue': 0.91},  # Very light orange (gentle alert)
                 'spacing_row': {'red': 1.0, 'green': 1.0, 'blue': 1.0}  # White for spacing
             }
             
@@ -1007,7 +1007,7 @@ class DiscrepancyAnalyzer:
                                 'userEnteredFormat': {
                                     'backgroundColor': summary_colors['analysis_header'],
                                     'textFormat': {
-                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},  # Black text for light background
                                         'fontSize': 14,
                                         'bold': True
                                     },
@@ -1032,7 +1032,7 @@ class DiscrepancyAnalyzer:
                                 'userEnteredFormat': {
                                     'backgroundColor': summary_colors['best_performer'],
                                     'textFormat': {
-                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},  # Black text for light background
                                         'fontSize': 11,
                                         'bold': True
                                     },
@@ -1057,7 +1057,7 @@ class DiscrepancyAnalyzer:
                                 'userEnteredFormat': {
                                     'backgroundColor': summary_colors['worst_performer'],
                                     'textFormat': {
-                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},  # Black text for light background
                                         'fontSize': 11,
                                         'bold': True
                                     },
