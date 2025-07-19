@@ -142,15 +142,15 @@ class DiscrepancyAnalyzer:
                 discrepancies.append({
                     'Date': date.strftime('%d-%b-%Y'),
                     'Purchase Officer': officer,
-                    'Purchase Birds': round(purchase_row['NUMBER OF BIRDS'], 2),
-                    'Inventory Birds': round(inv_row['NUMBER OF BIRDS'], 2),
-                    'Birds Difference': bird_diff,
-                    'Purchase Chicken Weight': round(purchase_row['PURCHASED CHICKEN WEIGHT'], 2),
-                    'Inventory Chicken Weight': round(inv_row['INVENTORY CHICKEN WEIGHT'], 2),
-                    'Chicken Weight Difference': chicken_diff,
-                    'Purchase Gizzard Weight': round(purchase_row['PURCHASED GIZZARD WEIGHT'], 2),
-                    'Inventory Gizzard Weight': round(inv_row['INVENTORY GIZZARD WEIGHT'], 2),
-                    'Gizzard Weight Difference': gizzard_diff,
+                    'Purchase Birds': f"{round(purchase_row['NUMBER OF BIRDS'], 2):,}",
+                    'Inventory Birds': f"{round(inv_row['NUMBER OF BIRDS'], 2):,}",
+                    'Birds Difference': f"{bird_diff:,}",
+                    'Purchase Chicken Weight': f"{round(purchase_row['PURCHASED CHICKEN WEIGHT'], 2):,}",
+                    'Inventory Chicken Weight': f"{round(inv_row['INVENTORY CHICKEN WEIGHT'], 2):,}",
+                    'Chicken Weight Difference': f"{chicken_diff:,}",
+                    'Purchase Gizzard Weight': f"{round(purchase_row['PURCHASED GIZZARD WEIGHT'], 2):,}",
+                    'Inventory Gizzard Weight': f"{round(inv_row['INVENTORY GIZZARD WEIGHT'], 2):,}",
+                    'Gizzard Weight Difference': f"{gizzard_diff:,}",
                     'Birds Percentage Difference': f"{bird_pct_diff}%",
                     'Chicken Weight Percentage Difference': f"{chicken_pct_diff}%",
                     'Gizzard Weight Percentage Difference': f"{gizzard_pct_diff}%",
@@ -167,13 +167,13 @@ class DiscrepancyAnalyzer:
                 discrepancies.append({
                     'Date': date.strftime('%d-%b-%Y'),
                     'Purchase Officer': officer,
-                    'Purchase Birds': round(purchase_row['NUMBER OF BIRDS'], 2),
+                    'Purchase Birds': f"{round(purchase_row['NUMBER OF BIRDS'], 2):,}",
                     'Inventory Birds': 'NOT FOUND',
                     'Birds Difference': 'N/A',
-                    'Purchase Chicken Weight': round(purchase_row['PURCHASED CHICKEN WEIGHT'], 2),
+                    'Purchase Chicken Weight': f"{round(purchase_row['PURCHASED CHICKEN WEIGHT'], 2):,}",
                     'Inventory Chicken Weight': 'NOT FOUND',
                     'Chicken Weight Difference': 'N/A',
-                    'Purchase Gizzard Weight': round(purchase_row['PURCHASED GIZZARD WEIGHT'], 2),
+                    'Purchase Gizzard Weight': f"{round(purchase_row['PURCHASED GIZZARD WEIGHT'], 2):,}",
                     'Inventory Gizzard Weight': 'NOT FOUND',
                     'Gizzard Weight Difference': 'N/A',
                     'Birds Percentage Difference': 'N/A',
@@ -200,13 +200,13 @@ class DiscrepancyAnalyzer:
                     'Date': date.strftime('%d-%b-%Y'),
                     'Purchase Officer': officer,
                     'Purchase Birds': 'NOT FOUND',
-                    'Inventory Birds': round(inv_row['NUMBER OF BIRDS'], 2),
+                    'Inventory Birds': f"{round(inv_row['NUMBER OF BIRDS'], 2):,}",
                     'Birds Difference': 'N/A',
                     'Purchase Chicken Weight': 'NOT FOUND',
-                    'Inventory Chicken Weight': round(inv_row['INVENTORY CHICKEN WEIGHT'], 2),
+                    'Inventory Chicken Weight': f"{round(inv_row['INVENTORY CHICKEN WEIGHT'], 2):,}",
                     'Chicken Weight Difference': 'N/A',
                     'Purchase Gizzard Weight': 'NOT FOUND',
-                    'Inventory Gizzard Weight': round(inv_row['INVENTORY GIZZARD WEIGHT'], 2),
+                    'Inventory Gizzard Weight': f"{round(inv_row['INVENTORY GIZZARD WEIGHT'], 2):,}",
                     'Gizzard Weight Difference': 'N/A',
                     'Birds Percentage Difference': 'N/A',
                     'Chicken Weight Percentage Difference': 'N/A',
@@ -395,18 +395,177 @@ class DiscrepancyAnalyzer:
                 i_chicken = 0
                 i_gizzard = 0
             
+            # Calculate differences
+            birds_diff = round(p_birds - i_birds, 2)
+            chicken_diff = round(p_chicken - i_chicken, 2)
+            gizzard_diff = round(p_gizzard - i_gizzard, 2)
+            
+            # Calculate percentage differences
+            birds_pct = round((birds_diff / p_birds) * 100, 2) if p_birds > 0 else 0
+            chicken_pct = round((chicken_diff / p_chicken) * 100, 2) if p_chicken > 0 else 0
+            gizzard_pct = round((gizzard_diff / p_gizzard) * 100, 2) if p_gizzard > 0 else 0
+            
             summaries.append({
                 'Month': str(year_month),
                 'Purchase Officer': officer,
-                'Purchase Birds Total': p_birds,
-                'Inventory Birds Total': i_birds,
-                'Purchase Chicken Weight Total': p_chicken,
-                'Inventory Chicken Weight Total': i_chicken,
-                'Purchase Gizzard Weight Total': p_gizzard,
-                'Inventory Gizzard Weight Total': i_gizzard
+                'Purchase Birds Total': f"{p_birds:,.0f}",
+                'Inventory Birds Total': f"{i_birds:,.0f}",
+                'Birds Difference': f"{birds_diff:,.0f}",
+                'Birds Percentage Difference': f"{birds_pct}%",
+                'Purchase Chicken Weight Total': f"{p_chicken:,.2f}",
+                'Inventory Chicken Weight Total': f"{i_chicken:,.2f}",
+                'Chicken Weight Difference': f"{chicken_diff:,.2f}",
+                'Chicken Weight Percentage Difference': f"{chicken_pct}%",
+                'Purchase Gizzard Weight Total': f"{p_gizzard:,.2f}",
+                'Inventory Gizzard Weight Total': f"{i_gizzard:,.2f}",
+                'Gizzard Weight Difference': f"{gizzard_diff:,.2f}",
+                'Gizzard Weight Percentage Difference': f"{gizzard_pct}%"
             })
         
+        # Add summary statistics and grand totals
+        summary_df = pd.DataFrame(summaries)
+        if not summary_df.empty:
+            # Add grand totals row
+            grand_totals = self._calculate_grand_totals(summary_df)
+            summaries.append(grand_totals)
+            
+            # Add performance analysis rows at the end
+            summary_analysis = self._analyze_monthly_performance(summary_df)
+            for analysis_row in summary_analysis:
+                summaries.append(analysis_row)
+        
         return pd.DataFrame(summaries)
+    
+    def _calculate_grand_totals(self, df):
+        """Calculate grand totals for all numeric columns"""
+        # Convert numeric strings back to numbers for totaling
+        def parse_numeric(value_str):
+            if isinstance(value_str, str) and value_str.replace(',', '').replace('.', '').replace('-', '').isdigit():
+                return float(value_str.replace(',', ''))
+            return 0
+        
+        # Calculate totals for each category
+        total_p_birds = sum(parse_numeric(str(val)) for val in df['Purchase Birds Total'])
+        total_i_birds = sum(parse_numeric(str(val)) for val in df['Inventory Birds Total'])
+        total_p_chicken = sum(parse_numeric(str(val)) for val in df['Purchase Chicken Weight Total'])
+        total_i_chicken = sum(parse_numeric(str(val)) for val in df['Inventory Chicken Weight Total'])
+        total_p_gizzard = sum(parse_numeric(str(val)) for val in df['Purchase Gizzard Weight Total'])
+        total_i_gizzard = sum(parse_numeric(str(val)) for val in df['Inventory Gizzard Weight Total'])
+        
+        # Calculate total differences
+        total_birds_diff = total_p_birds - total_i_birds
+        total_chicken_diff = total_p_chicken - total_i_chicken
+        total_gizzard_diff = total_p_gizzard - total_i_gizzard
+        
+        # Calculate total percentage differences
+        total_birds_pct = round((total_birds_diff / total_p_birds) * 100, 2) if total_p_birds > 0 else 0
+        total_chicken_pct = round((total_chicken_diff / total_p_chicken) * 100, 2) if total_p_chicken > 0 else 0
+        total_gizzard_pct = round((total_gizzard_diff / total_p_gizzard) * 100, 2) if total_p_gizzard > 0 else 0
+        
+        return {
+            'Month': '',
+            'Purchase Officer': '═══════ GRAND TOTALS ═══════',
+            'Purchase Birds Total': f"{total_p_birds:,.0f}",
+            'Inventory Birds Total': f"{total_i_birds:,.0f}",
+            'Birds Difference': f"{total_birds_diff:,.0f}",
+            'Birds Percentage Difference': f"{total_birds_pct}%",
+            'Purchase Chicken Weight Total': f"{total_p_chicken:,.2f}",
+            'Inventory Chicken Weight Total': f"{total_i_chicken:,.2f}",
+            'Chicken Weight Difference': f"{total_chicken_diff:,.2f}",
+            'Chicken Weight Percentage Difference': f"{total_chicken_pct}%",
+            'Purchase Gizzard Weight Total': f"{total_p_gizzard:,.2f}",
+            'Inventory Gizzard Weight Total': f"{total_i_gizzard:,.2f}",
+            'Gizzard Weight Difference': f"{total_gizzard_diff:,.2f}",
+            'Gizzard Weight Percentage Difference': f"{total_gizzard_pct}%"
+        }
+    
+    def _analyze_monthly_performance(self, df):
+        """Analyze monthly performance and identify best/worst performers"""
+        analysis_rows = []
+        
+        # Convert percentage strings back to numbers for analysis
+        df_analysis = df.copy()
+        for col in ['Birds Percentage Difference', 'Chicken Weight Percentage Difference', 'Gizzard Weight Percentage Difference']:
+            df_analysis[col + '_numeric'] = df_analysis[col].str.replace('%', '').astype(float)
+        
+        # Group by officer and calculate average discrepancies
+        officer_performance = df_analysis.groupby('Purchase Officer').agg({
+            'Birds Percentage Difference_numeric': 'mean',
+            'Chicken Weight Percentage Difference_numeric': 'mean', 
+            'Gizzard Weight Percentage Difference_numeric': 'mean'
+        }).round(2)
+        
+        # Find best and worst performers for each category
+        categories = [
+            ('Birds', 'Birds Percentage Difference_numeric'),
+            ('Chicken', 'Chicken Weight Percentage Difference_numeric'),
+            ('Gizzard', 'Gizzard Weight Percentage Difference_numeric')
+        ]
+        
+        # Add separator row
+        analysis_rows.append({
+            'Month': '',
+            'Purchase Officer': '═══════ PERFORMANCE ANALYSIS ═══════',
+            'Purchase Birds Total': '',
+            'Inventory Birds Total': '',
+            'Birds Difference': '',
+            'Birds Percentage Difference': '',
+            'Purchase Chicken Weight Total': '',
+            'Inventory Chicken Weight Total': '',
+            'Chicken Weight Difference': '',
+            'Chicken Weight Percentage Difference': '',
+            'Purchase Gizzard Weight Total': '',
+            'Inventory Gizzard Weight Total': '',
+            'Gizzard Weight Difference': '',
+            'Gizzard Weight Percentage Difference': ''
+        })
+        
+        for category_name, col_name in categories:
+            # Lowest discrepancy (best performance)
+            best_officer = officer_performance[col_name].abs().idxmin()
+            best_value = officer_performance.loc[best_officer, col_name]
+            
+            # Highest discrepancy (worst performance)
+            worst_officer = officer_performance[col_name].abs().idxmax()
+            worst_value = officer_performance.loc[worst_officer, col_name]
+            
+            # Add best performer row
+            analysis_rows.append({
+                'Month': '',
+                'Purchase Officer': f'🏆 BEST {category_name.upper()}: {best_officer}',
+                'Purchase Birds Total': '',
+                'Inventory Birds Total': '',
+                'Birds Difference': '',
+                'Birds Percentage Difference': f'{best_value}%' if category_name == 'Birds' else '',
+                'Purchase Chicken Weight Total': '',
+                'Inventory Chicken Weight Total': '',
+                'Chicken Weight Difference': '',
+                'Chicken Weight Percentage Difference': f'{best_value}%' if category_name == 'Chicken' else '',
+                'Purchase Gizzard Weight Total': '',
+                'Inventory Gizzard Weight Total': '',
+                'Gizzard Weight Difference': '',
+                'Gizzard Weight Percentage Difference': f'{best_value}%' if category_name == 'Gizzard' else ''
+            })
+            
+            # Add worst performer row
+            analysis_rows.append({
+                'Month': '',
+                'Purchase Officer': f'⚠️ WORST {category_name.upper()}: {worst_officer}',
+                'Purchase Birds Total': '',
+                'Inventory Birds Total': '',
+                'Birds Difference': '',
+                'Birds Percentage Difference': f'{worst_value}%' if category_name == 'Birds' else '',
+                'Purchase Chicken Weight Total': '',
+                'Inventory Chicken Weight Total': '',
+                'Chicken Weight Difference': '',
+                'Chicken Weight Percentage Difference': f'{worst_value}%' if category_name == 'Chicken' else '',
+                'Purchase Gizzard Weight Total': '',
+                'Inventory Gizzard Weight Total': '',
+                'Gizzard Weight Difference': '',
+                'Gizzard Weight Percentage Difference': f'{worst_value}%' if category_name == 'Gizzard' else ''
+            })
+        
+        return analysis_rows
     
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and customization"""
@@ -646,8 +805,12 @@ class DiscrepancyAnalyzer:
                 }
             })
             
+            # Special formatting for Monthly Summary Report
+            if 'MONTHLY SUMMARY' in title:
+                self._apply_monthly_summary_formatting(worksheet_id, df, requests, colors)
+            
             # Format data rows based on Status and Resolution Status columns
-            if 'Status' in df.columns:
+            elif 'Status' in df.columns:
                 status_col_index = df.columns.get_loc('Status')
                 resolution_col_index = df.columns.get_loc('Resolution Status') if 'Resolution Status' in df.columns else None
                 
@@ -757,6 +920,243 @@ class DiscrepancyAnalyzer:
                 
         except Exception as e:
             print(f"Error applying formatting: {e}")
+    
+    def _apply_monthly_summary_formatting(self, worksheet_id, df, requests, colors):
+        """Apply colorful formatting specific to monthly summary report"""
+        try:
+            # Enhanced color palette for monthly summary
+            summary_colors = {
+                'purchase_total': {'red': 0.85, 'green': 0.95, 'blue': 1.0},  # Light blue
+                'inventory_total': {'red': 0.95, 'green': 1.0, 'blue': 0.85},  # Light green
+                'difference_positive': {'red': 1.0, 'green': 0.9, 'blue': 0.9},  # Light red
+                'difference_negative': {'red': 0.9, 'green': 1.0, 'blue': 0.9},  # Light green
+                'percentage_high': {'red': 1.0, 'green': 0.7, 'blue': 0.7},  # Red for high discrepancy
+                'percentage_low': {'red': 0.7, 'green': 1.0, 'blue': 0.7},  # Green for low discrepancy
+                'analysis_header': {'red': 0.3, 'green': 0.2, 'blue': 0.7},  # Purple
+                'best_performer': {'red': 0.7, 'green': 1.0, 'blue': 0.7},  # Bright green
+                'worst_performer': {'red': 1.0, 'green': 0.7, 'blue': 0.7}  # Bright red
+            }
+            
+            # Get column indices for different types
+            purchase_cols = [i for i, col in enumerate(df.columns) if 'Purchase' in col and 'Total' in col]
+            inventory_cols = [i for i, col in enumerate(df.columns) if 'Inventory' in col and 'Total' in col]
+            difference_cols = [i for i, col in enumerate(df.columns) if 'Difference' in col and '%' not in col]
+            percentage_cols = [i for i, col in enumerate(df.columns) if 'Percentage Difference' in col]
+            
+            for row_idx, row_data in enumerate(df.values, 3):  # Starting from row 4 (index 3)
+                officer_name = str(row_data[df.columns.get_loc('Purchase Officer')])
+                
+                # Special formatting for analysis rows
+                if 'GRAND TOTALS' in officer_name:
+                    # Grand totals row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': {'red': 0.2, 'green': 0.3, 'blue': 0.6},  # Dark blue
+                                    'textFormat': {
+                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                        'fontSize': 13,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif 'PERFORMANCE ANALYSIS' in officer_name:
+                    # Analysis header row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': summary_colors['analysis_header'],
+                                    'textFormat': {
+                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                        'fontSize': 12,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif 'BEST' in officer_name:
+                    # Best performer row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': summary_colors['best_performer'],
+                                    'textFormat': {
+                                        'fontSize': 11,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif 'WORST' in officer_name:
+                    # Worst performer row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': summary_colors['worst_performer'],
+                                    'textFormat': {
+                                        'fontSize': 11,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                else:
+                    # Regular data rows with column-specific formatting
+                    # Format purchase total columns
+                    for col_idx in purchase_cols:
+                        requests.append({
+                            'repeatCell': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'startRowIndex': row_idx,
+                                    'endRowIndex': row_idx + 1,
+                                    'startColumnIndex': col_idx,
+                                    'endColumnIndex': col_idx + 1
+                                },
+                                'cell': {
+                                    'userEnteredFormat': {
+                                        'backgroundColor': summary_colors['purchase_total'],
+                                        'textFormat': {'fontSize': 10, 'bold': True},
+                                        'horizontalAlignment': 'CENTER'
+                                    }
+                                },
+                                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                            }
+                        })
+                    
+                    # Format inventory total columns
+                    for col_idx in inventory_cols:
+                        requests.append({
+                            'repeatCell': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'startRowIndex': row_idx,
+                                    'endRowIndex': row_idx + 1,
+                                    'startColumnIndex': col_idx,
+                                    'endColumnIndex': col_idx + 1
+                                },
+                                'cell': {
+                                    'userEnteredFormat': {
+                                        'backgroundColor': summary_colors['inventory_total'],
+                                        'textFormat': {'fontSize': 10, 'bold': True},
+                                        'horizontalAlignment': 'CENTER'
+                                    }
+                                },
+                                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                            }
+                        })
+                    
+                    # Format difference columns based on positive/negative
+                    for col_idx in difference_cols:
+                        diff_value_str = str(row_data[col_idx])
+                        if diff_value_str and diff_value_str != '':
+                            try:
+                                diff_value = float(diff_value_str.replace(',', ''))
+                                bg_color = summary_colors['difference_positive'] if diff_value > 0 else summary_colors['difference_negative']
+                                requests.append({
+                                    'repeatCell': {
+                                        'range': {
+                                            'sheetId': worksheet_id,
+                                            'startRowIndex': row_idx,
+                                            'endRowIndex': row_idx + 1,
+                                            'startColumnIndex': col_idx,
+                                            'endColumnIndex': col_idx + 1
+                                        },
+                                        'cell': {
+                                            'userEnteredFormat': {
+                                                'backgroundColor': bg_color,
+                                                'textFormat': {'fontSize': 10, 'bold': True},
+                                                'horizontalAlignment': 'CENTER'
+                                            }
+                                        },
+                                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                                    }
+                                })
+                            except ValueError:
+                                pass
+                    
+                    # Format percentage columns based on threshold
+                    for col_idx in percentage_cols:
+                        pct_value_str = str(row_data[col_idx])
+                        if pct_value_str and pct_value_str.endswith('%'):
+                            try:
+                                pct_value = float(pct_value_str.replace('%', ''))
+                                if abs(pct_value) > 2.0:  # High discrepancy threshold
+                                    bg_color = summary_colors['percentage_high']
+                                    text_bold = True
+                                else:
+                                    bg_color = summary_colors['percentage_low']
+                                    text_bold = False
+                                
+                                requests.append({
+                                    'repeatCell': {
+                                        'range': {
+                                            'sheetId': worksheet_id,
+                                            'startRowIndex': row_idx,
+                                            'endRowIndex': row_idx + 1,
+                                            'startColumnIndex': col_idx,
+                                            'endColumnIndex': col_idx + 1
+                                        },
+                                        'cell': {
+                                            'userEnteredFormat': {
+                                                'backgroundColor': bg_color,
+                                                'textFormat': {'fontSize': 10, 'bold': text_bold},
+                                                'horizontalAlignment': 'CENTER'
+                                            }
+                                        },
+                                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                                    }
+                                })
+                            except ValueError:
+                                pass
+                                
+        except Exception as e:
+            print(f"Error applying monthly summary formatting: {e}")
     
     def _add_dropdown_validation(self, worksheet, df, title):
         """Add dropdown validation to specific columns"""
