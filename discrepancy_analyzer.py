@@ -405,6 +405,30 @@ class DiscrepancyAnalyzer:
             chicken_pct = round((chicken_diff / p_chicken) * 100, 2) if p_chicken > 0 else 0
             gizzard_pct = round((gizzard_diff / p_gizzard) * 100, 2) if p_gizzard > 0 else 0
             
+            # Calculate accuracy score (% of categories with <2% discrepancy)
+            accurate_categories = 0
+            total_categories = 0
+            
+            for pct in [abs(birds_pct), abs(chicken_pct), abs(gizzard_pct)]:
+                if pct is not None and pct != 0:  # Only count categories with data
+                    total_categories += 1
+                    if pct < 2.0:
+                        accurate_categories += 1
+            
+            accuracy_score = round((accurate_categories / total_categories) * 100, 1) if total_categories > 0 else 100.0
+            
+            # Calculate overall discrepancy (average absolute percentage)
+            total_discrepancies = [abs(birds_pct), abs(chicken_pct), abs(gizzard_pct)]
+            avg_discrepancy = round(sum(total_discrepancies) / len(total_discrepancies), 2)
+            
+            # Risk classification
+            if avg_discrepancy < 2.0:
+                risk_level = "🟢 LOW"
+            elif avg_discrepancy < 5.0:
+                risk_level = "🟡 MEDIUM"
+            else:
+                risk_level = "🔴 HIGH"
+            
             summaries.append({
                 'Month': str(year_month),
                 'Purchase Officer': officer,
@@ -419,7 +443,10 @@ class DiscrepancyAnalyzer:
                 'Purchase Gizzard Weight Total': f"{p_gizzard:,.2f}",
                 'Inventory Gizzard Weight Total': f"{i_gizzard:,.2f}",
                 'Gizzard Weight Difference': f"{gizzard_diff:,.2f}",
-                'Gizzard Weight Percentage Difference': f"{gizzard_pct}%"
+                'Gizzard Weight Percentage Difference': f"{gizzard_pct}%",
+                'Accuracy Score': f"{accuracy_score}%",
+                'Risk Level': risk_level,
+                'Avg Discrepancy': f"{avg_discrepancy}%"
             })
         
         # Add summary statistics and grand totals
@@ -462,6 +489,24 @@ class DiscrepancyAnalyzer:
         total_chicken_pct = round((total_chicken_diff / total_p_chicken) * 100, 2) if total_p_chicken > 0 else 0
         total_gizzard_pct = round((total_gizzard_diff / total_p_gizzard) * 100, 2) if total_p_gizzard > 0 else 0
         
+        # Calculate overall system accuracy
+        total_avg_discrepancy = round((abs(total_birds_pct) + abs(total_chicken_pct) + abs(total_gizzard_pct)) / 3, 2)
+        
+        # System-wide accuracy score
+        accurate_system_categories = 0
+        if abs(total_birds_pct) < 2.0: accurate_system_categories += 1
+        if abs(total_chicken_pct) < 2.0: accurate_system_categories += 1  
+        if abs(total_gizzard_pct) < 2.0: accurate_system_categories += 1
+        system_accuracy = round((accurate_system_categories / 3) * 100, 1)
+        
+        # System risk level
+        if total_avg_discrepancy < 2.0:
+            system_risk = "🟢 LOW"
+        elif total_avg_discrepancy < 5.0:
+            system_risk = "🟡 MEDIUM"
+        else:
+            system_risk = "🔴 HIGH"
+        
         return {
             'Month': '',
             'Purchase Officer': '═══════ GRAND TOTALS ═══════',
@@ -476,24 +521,35 @@ class DiscrepancyAnalyzer:
             'Purchase Gizzard Weight Total': f"{total_p_gizzard:,.2f}",
             'Inventory Gizzard Weight Total': f"{total_i_gizzard:,.2f}",
             'Gizzard Weight Difference': f"{total_gizzard_diff:,.2f}",
-            'Gizzard Weight Percentage Difference': f"{total_gizzard_pct}%"
+            'Gizzard Weight Percentage Difference': f"{total_gizzard_pct}%",
+            'Accuracy Score': f"{system_accuracy}%",
+            'Risk Level': system_risk,
+            'Avg Discrepancy': f"{total_avg_discrepancy}%"
         }
     
     def _analyze_monthly_performance(self, df):
-        """Analyze monthly performance and identify best/worst performers"""
+        """Analyze monthly performance and identify best/worst performers with management insights"""
         analysis_rows = []
         
         # Convert percentage strings back to numbers for analysis
         df_analysis = df.copy()
-        for col in ['Birds Percentage Difference', 'Chicken Weight Percentage Difference', 'Gizzard Weight Percentage Difference']:
+        for col in ['Birds Percentage Difference', 'Chicken Weight Percentage Difference', 'Gizzard Weight Percentage Difference', 'Accuracy Score', 'Avg Discrepancy']:
             df_analysis[col + '_numeric'] = df_analysis[col].str.replace('%', '').astype(float)
         
-        # Group by officer and calculate average discrepancies
+        # Group by officer and calculate comprehensive metrics
         officer_performance = df_analysis.groupby('Purchase Officer').agg({
             'Birds Percentage Difference_numeric': 'mean',
             'Chicken Weight Percentage Difference_numeric': 'mean', 
-            'Gizzard Weight Percentage Difference_numeric': 'mean'
+            'Gizzard Weight Percentage Difference_numeric': 'mean',
+            'Accuracy Score_numeric': 'mean',
+            'Avg Discrepancy_numeric': 'mean'
         }).round(2)
+        
+        # Calculate month-over-month trends if multiple months exist
+        trends = self._calculate_monthly_trends(df_analysis)
+        
+        # Calculate system health metrics
+        system_health = self._calculate_system_health(df_analysis)
         
         # Find best and worst performers for each category
         categories = [
@@ -503,7 +559,7 @@ class DiscrepancyAnalyzer:
         ]
         
         # Add spacing rows before performance analysis
-        for i in range(2):
+        for _ in range(2):
             analysis_rows.append({
                 'Month': '',
                 'Purchase Officer': '',
@@ -518,13 +574,16 @@ class DiscrepancyAnalyzer:
                 'Purchase Gizzard Weight Total': '',
                 'Inventory Gizzard Weight Total': '',
                 'Gizzard Weight Difference': '',
-                'Gizzard Weight Percentage Difference': ''
+                'Gizzard Weight Percentage Difference': '',
+                'Accuracy Score': '',
+                'Risk Level': '',
+                'Avg Discrepancy': ''
             })
         
-        # Add separator row
+        # Add system health dashboard
         analysis_rows.append({
             'Month': '',
-            'Purchase Officer': '📊 PERFORMANCE ANALYSIS',
+            'Purchase Officer': '🏥 SYSTEM HEALTH DASHBOARD',
             'Purchase Birds Total': '',
             'Inventory Birds Total': '',
             'Birds Difference': '',
@@ -536,55 +595,281 @@ class DiscrepancyAnalyzer:
             'Purchase Gizzard Weight Total': '',
             'Inventory Gizzard Weight Total': '',
             'Gizzard Weight Difference': '',
-            'Gizzard Weight Percentage Difference': ''
+            'Gizzard Weight Percentage Difference': '',
+            'Accuracy Score': f"{system_health['system_accuracy']}%",
+            'Risk Level': system_health['health_status'],
+            'Avg Discrepancy': f"Alerts: {system_health['alert_count']}/{system_health['total_officers']}"
         })
         
-        for category_name, col_name in categories:
-            # Lowest discrepancy (best performance)
-            best_officer = officer_performance[col_name].abs().idxmin()
-            best_value = officer_performance.loc[best_officer, col_name]
-            
-            # Highest discrepancy (worst performance)
-            worst_officer = officer_performance[col_name].abs().idxmax()
-            worst_value = officer_performance.loc[worst_officer, col_name]
-            
-            # Add best performer row
+        analysis_rows.append({
+            'Month': '',
+            'Purchase Officer': f"📈 Risk Distribution: 🟢{system_health['low_risk']} 🟡{system_health['medium_risk']} 🔴{system_health['high_risk']}",
+            'Purchase Birds Total': '',
+            'Inventory Birds Total': '',
+            'Birds Difference': '',
+            'Birds Percentage Difference': '',
+            'Purchase Chicken Weight Total': '',
+            'Inventory Chicken Weight Total': '',
+            'Chicken Weight Difference': '',
+            'Chicken Weight Percentage Difference': '',
+            'Purchase Gizzard Weight Total': '',
+            'Inventory Gizzard Weight Total': '',
+            'Gizzard Weight Difference': '',
+            'Gizzard Weight Percentage Difference': '',
+            'Accuracy Score': '',
+            'Risk Level': '',
+            'Avg Discrepancy': ''
+        })
+        
+        # Add spacing and performance analysis header
+        analysis_rows.append({
+            'Month': '',
+            'Purchase Officer': '',
+            'Purchase Birds Total': '',
+            'Inventory Birds Total': '',
+            'Birds Difference': '',
+            'Birds Percentage Difference': '',
+            'Purchase Chicken Weight Total': '',
+            'Inventory Chicken Weight Total': '',
+            'Chicken Weight Difference': '',
+            'Chicken Weight Percentage Difference': '',
+            'Purchase Gizzard Weight Total': '',
+            'Inventory Gizzard Weight Total': '',
+            'Gizzard Weight Difference': '',
+            'Gizzard Weight Percentage Difference': '',
+            'Accuracy Score': '',
+            'Risk Level': '',
+            'Avg Discrepancy': ''
+        })
+        
+        analysis_rows.append({
+            'Month': '',
+            'Purchase Officer': '📊 PERFORMANCE RANKINGS',
+            'Purchase Birds Total': '',
+            'Inventory Birds Total': '',
+            'Birds Difference': '',
+            'Birds Percentage Difference': '',
+            'Purchase Chicken Weight Total': '',
+            'Inventory Chicken Weight Total': '',
+            'Chicken Weight Difference': '',
+            'Chicken Weight Percentage Difference': '',
+            'Purchase Gizzard Weight Total': '',
+            'Inventory Gizzard Weight Total': '',
+            'Gizzard Weight Difference': '',
+            'Gizzard Weight Percentage Difference': '',
+            'Accuracy Score': '',
+            'Risk Level': '',
+            'Avg Discrepancy': ''
+        })
+        
+        # Enhanced rankings with Top 3/Bottom 3 and trends
+        # Overall accuracy rankings
+        top_performers = officer_performance.nlargest(3, 'Accuracy Score_numeric')
+        bottom_performers = officer_performance.nsmallest(3, 'Accuracy Score_numeric')
+        
+        # Add top performers
+        analysis_rows.append({
+            'Month': '',
+            'Purchase Officer': '🏆 TOP 3 OVERALL ACCURACY',
+            'Purchase Birds Total': '',
+            'Inventory Birds Total': '',
+            'Birds Difference': '',
+            'Birds Percentage Difference': '',
+            'Purchase Chicken Weight Total': '',
+            'Inventory Chicken Weight Total': '',
+            'Chicken Weight Difference': '',
+            'Chicken Weight Percentage Difference': '',
+            'Purchase Gizzard Weight Total': '',
+            'Inventory Gizzard Weight Total': '',
+            'Gizzard Weight Difference': '',
+            'Gizzard Weight Percentage Difference': '',
+            'Accuracy Score': '',
+            'Risk Level': '',
+            'Avg Discrepancy': ''
+        })
+        
+        for i, (officer, data) in enumerate(top_performers.iterrows(), 1):
+            trend = trends.get(officer, "➡️ NEW")
             analysis_rows.append({
                 'Month': '',
-                'Purchase Officer': f'🥇 BEST {category_name.upper()} ACCURACY: {best_officer}',
+                'Purchase Officer': f'{["🥇", "🥈", "🥉"][i-1]} {officer} {trend}',
                 'Purchase Birds Total': '',
                 'Inventory Birds Total': '',
                 'Birds Difference': '',
-                'Birds Percentage Difference': f'{best_value}%' if category_name == 'Birds' else '',
+                'Birds Percentage Difference': '',
                 'Purchase Chicken Weight Total': '',
                 'Inventory Chicken Weight Total': '',
                 'Chicken Weight Difference': '',
-                'Chicken Weight Percentage Difference': f'{best_value}%' if category_name == 'Chicken' else '',
+                'Chicken Weight Percentage Difference': '',
                 'Purchase Gizzard Weight Total': '',
                 'Inventory Gizzard Weight Total': '',
                 'Gizzard Weight Difference': '',
-                'Gizzard Weight Percentage Difference': f'{best_value}%' if category_name == 'Gizzard' else ''
-            })
-            
-            # Add worst performer row
-            analysis_rows.append({
-                'Month': '',
-                'Purchase Officer': f'🔴 NEEDS IMPROVEMENT - {category_name.upper()}: {worst_officer}',
-                'Purchase Birds Total': '',
-                'Inventory Birds Total': '',
-                'Birds Difference': '',
-                'Birds Percentage Difference': f'{worst_value}%' if category_name == 'Birds' else '',
-                'Purchase Chicken Weight Total': '',
-                'Inventory Chicken Weight Total': '',
-                'Chicken Weight Difference': '',
-                'Chicken Weight Percentage Difference': f'{worst_value}%' if category_name == 'Chicken' else '',
-                'Purchase Gizzard Weight Total': '',
-                'Inventory Gizzard Weight Total': '',
-                'Gizzard Weight Difference': '',
-                'Gizzard Weight Percentage Difference': f'{worst_value}%' if category_name == 'Gizzard' else ''
+                'Gizzard Weight Percentage Difference': '',
+                'Accuracy Score': f"{data['Accuracy Score_numeric']}%",
+                'Risk Level': '🟢 LOW' if data['Avg Discrepancy_numeric'] < 2 else '🟡 MEDIUM' if data['Avg Discrepancy_numeric'] < 5 else '🔴 HIGH',
+                'Avg Discrepancy': f"{data['Avg Discrepancy_numeric']}%"
             })
         
+        # Add spacing
+        analysis_rows.append({
+            'Month': '',
+            'Purchase Officer': '',
+            'Purchase Birds Total': '',
+            'Inventory Birds Total': '',
+            'Birds Difference': '',
+            'Birds Percentage Difference': '',
+            'Purchase Chicken Weight Total': '',
+            'Inventory Chicken Weight Total': '',
+            'Chicken Weight Difference': '',
+            'Chicken Weight Percentage Difference': '',
+            'Purchase Gizzard Weight Total': '',
+            'Inventory Gizzard Weight Total': '',
+            'Gizzard Weight Difference': '',
+            'Gizzard Weight Percentage Difference': '',
+            'Accuracy Score': '',
+            'Risk Level': '',
+            'Avg Discrepancy': ''
+        })
+        
+        # Add bottom performers (needs improvement)
+        analysis_rows.append({
+            'Month': '',
+            'Purchase Officer': '📋 NEEDS ATTENTION - BOTTOM 3',
+            'Purchase Birds Total': '',
+            'Inventory Birds Total': '',
+            'Birds Difference': '',
+            'Birds Percentage Difference': '',
+            'Purchase Chicken Weight Total': '',
+            'Inventory Chicken Weight Total': '',
+            'Chicken Weight Difference': '',
+            'Chicken Weight Percentage Difference': '',
+            'Purchase Gizzard Weight Total': '',
+            'Inventory Gizzard Weight Total': '',
+            'Gizzard Weight Difference': '',
+            'Gizzard Weight Percentage Difference': '',
+            'Accuracy Score': '',
+            'Risk Level': '',
+            'Avg Discrepancy': ''
+        })
+        
+        for i, (officer, data) in enumerate(bottom_performers.iterrows(), 1):
+            trend = trends.get(officer, "➡️ NEW")
+            analysis_rows.append({
+                'Month': '',
+                'Purchase Officer': f'⚠️ #{i} {officer} {trend}',
+                'Purchase Birds Total': '',
+                'Inventory Birds Total': '',
+                'Birds Difference': '',
+                'Birds Percentage Difference': '',
+                'Purchase Chicken Weight Total': '',
+                'Inventory Chicken Weight Total': '',
+                'Chicken Weight Difference': '',
+                'Chicken Weight Percentage Difference': '',
+                'Purchase Gizzard Weight Total': '',
+                'Inventory Gizzard Weight Total': '',
+                'Gizzard Weight Difference': '',
+                'Gizzard Weight Percentage Difference': '',
+                'Accuracy Score': f"{data['Accuracy Score_numeric']}%",
+                'Risk Level': '🟢 LOW' if data['Avg Discrepancy_numeric'] < 2 else '🟡 MEDIUM' if data['Avg Discrepancy_numeric'] < 5 else '🔴 HIGH',
+                'Avg Discrepancy': f"{data['Avg Discrepancy_numeric']}%"
+            })
+        
+        # Add most improved if trends available
+        if trends:
+            improving_officers = [officer for officer, trend in trends.items() if "IMPROVING" in trend]
+            if improving_officers:
+                analysis_rows.append({
+                    'Month': '',
+                    'Purchase Officer': '',
+                    'Purchase Birds Total': '',
+                    'Inventory Birds Total': '',
+                    'Birds Difference': '',
+                    'Birds Percentage Difference': '',
+                    'Purchase Chicken Weight Total': '',
+                    'Inventory Chicken Weight Total': '',
+                    'Chicken Weight Difference': '',
+                    'Chicken Weight Percentage Difference': '',
+                    'Purchase Gizzard Weight Total': '',
+                    'Inventory Gizzard Weight Total': '',
+                    'Gizzard Weight Difference': '',
+                    'Gizzard Weight Percentage Difference': '',
+                    'Accuracy Score': '',
+                    'Risk Level': '',
+                    'Avg Discrepancy': ''
+                })
+                
+                analysis_rows.append({
+                    'Month': '',
+                    'Purchase Officer': f'⭐ MOST IMPROVED: {improving_officers[0]}',
+                    'Purchase Birds Total': '',
+                    'Inventory Birds Total': '',
+                    'Birds Difference': '',
+                    'Birds Percentage Difference': '',
+                    'Purchase Chicken Weight Total': '',
+                    'Inventory Chicken Weight Total': '',
+                    'Chicken Weight Difference': '',
+                    'Chicken Weight Percentage Difference': '',
+                    'Purchase Gizzard Weight Total': '',
+                    'Inventory Gizzard Weight Total': '',
+                    'Gizzard Weight Difference': '',
+                    'Gizzard Weight Percentage Difference': '',
+                    'Accuracy Score': '',
+                    'Risk Level': '📈 IMPROVING',
+                    'Avg Discrepancy': ''
+                })
+        
         return analysis_rows
+    
+    def _calculate_monthly_trends(self, df):
+        """Calculate month-over-month trends for officers"""
+        trends = {}
+        if len(df['Month'].unique()) < 2:
+            return trends  # Need at least 2 months for trends
+        
+        # Sort by month to get chronological order
+        df_sorted = df.sort_values(['Purchase Officer', 'Month'])
+        
+        for officer in df['Purchase Officer'].unique():
+            officer_data = df_sorted[df_sorted['Purchase Officer'] == officer]
+            if len(officer_data) >= 2:
+                # Get last two months for trend calculation
+                recent_months = officer_data.tail(2)
+                if len(recent_months) == 2:
+                    prev_accuracy = recent_months.iloc[0]['Accuracy Score_numeric']
+                    curr_accuracy = recent_months.iloc[1]['Accuracy Score_numeric']
+                    
+                    trend_change = curr_accuracy - prev_accuracy
+                    if trend_change > 5:
+                        trends[officer] = "📈 IMPROVING"
+                    elif trend_change < -5:
+                        trends[officer] = "📉 DECLINING"
+                    else:
+                        trends[officer] = "➡️ STABLE"
+        
+        return trends
+    
+    def _calculate_system_health(self, df):
+        """Calculate overall system health metrics"""
+        total_officers = len(df['Purchase Officer'].unique())
+        high_risk_officers = len(df[df['Avg Discrepancy_numeric'] > 5.0]['Purchase Officer'].unique())
+        medium_risk_officers = len(df[(df['Avg Discrepancy_numeric'] >= 2.0) & (df['Avg Discrepancy_numeric'] <= 5.0)]['Purchase Officer'].unique())
+        low_risk_officers = total_officers - high_risk_officers - medium_risk_officers
+        
+        # Overall system accuracy (average of all officer accuracies)
+        avg_system_accuracy = round(df['Accuracy Score_numeric'].mean(), 1)
+        
+        # Alert count (officers needing attention)
+        alert_count = high_risk_officers + medium_risk_officers
+        
+        return {
+            'total_officers': total_officers,
+            'high_risk': high_risk_officers,
+            'medium_risk': medium_risk_officers,
+            'low_risk': low_risk_officers,
+            'system_accuracy': avg_system_accuracy,
+            'alert_count': alert_count,
+            'health_status': '🟢 HEALTHY' if alert_count <= total_officers * 0.2 else '🟡 ATTENTION' if alert_count <= total_officers * 0.5 else '🔴 CRITICAL'
+        }
     
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and customization"""
@@ -992,7 +1277,57 @@ class DiscrepancyAnalyzer:
                             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                         }
                     })
-                elif 'PERFORMANCE ANALYSIS' in officer_name:
+                elif 'SYSTEM HEALTH DASHBOARD' in officer_name:
+                    # System health dashboard header
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': {'red': 0.2, 'green': 0.6, 'blue': 0.8},  # Healthcare blue
+                                    'textFormat': {
+                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                        'fontSize': 13,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif 'Risk Distribution' in officer_name:
+                    # Risk distribution row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': summary_colors['analysis_header'],
+                                    'textFormat': {
+                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},
+                                        'fontSize': 11,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'LEFT'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif 'PERFORMANCE RANKINGS' in officer_name or 'PERFORMANCE ANALYSIS' in officer_name:
                     # Analysis header row
                     requests.append({
                         'repeatCell': {
@@ -1017,7 +1352,33 @@ class DiscrepancyAnalyzer:
                             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                         }
                     })
-                elif 'BEST' in officer_name or 'ACCURACY' in officer_name:
+                elif 'TOP 3' in officer_name or 'BOTTOM 3' in officer_name or 'NEEDS ATTENTION' in officer_name:
+                    # Section headers for rankings
+                    bg_color = summary_colors['best_performer'] if 'TOP 3' in officer_name else summary_colors['worst_performer']
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': bg_color,
+                                    'textFormat': {
+                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},
+                                        'fontSize': 12,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif '🥇' in officer_name or '🥈' in officer_name or '🥉' in officer_name or 'BEST' in officer_name or 'ACCURACY' in officer_name:
                     # Best performer row
                     requests.append({
                         'repeatCell': {
@@ -1042,7 +1403,7 @@ class DiscrepancyAnalyzer:
                             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                         }
                     })
-                elif 'NEEDS IMPROVEMENT' in officer_name or 'WORST' in officer_name:
+                elif '⚠️' in officer_name or 'NEEDS IMPROVEMENT' in officer_name or 'WORST' in officer_name or '⭐ MOST IMPROVED' in officer_name:
                     # Needs improvement row
                     requests.append({
                         'repeatCell': {
