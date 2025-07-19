@@ -327,6 +327,87 @@ class DiscrepancyAnalyzer:
         
         return pd.DataFrame(mismatches)
     
+    def generate_monthly_summary_report(self, purchase_grouped, inventory_df):
+        """Generate monthly summary report by purchase officer"""
+        summaries = []
+        
+        # Process purchase data by month and officer
+        if not purchase_grouped.empty:
+            purchase_grouped['YEAR_MONTH'] = purchase_grouped['DATE'].dt.to_period('M')
+            purchase_monthly = purchase_grouped.groupby(['YEAR_MONTH', 'PURCHASE OFFICER NAME']).agg({
+                'NUMBER OF BIRDS': 'sum',
+                'PURCHASED CHICKEN WEIGHT': 'sum',
+                'PURCHASED GIZZARD WEIGHT': 'sum'
+            }).reset_index()
+        else:
+            purchase_monthly = pd.DataFrame()
+        
+        # Process inventory data by month and officer
+        if not inventory_df.empty:
+            inventory_df['YEAR_MONTH'] = inventory_df['DATE'].dt.to_period('M')
+            inventory_monthly = inventory_df.groupby(['YEAR_MONTH', 'PURCHASE OFFICER NAME']).agg({
+                'NUMBER OF BIRDS': 'sum',
+                'INVENTORY CHICKEN WEIGHT': 'sum',
+                'INVENTORY GIZZARD WEIGHT': 'sum'
+            }).reset_index()
+        else:
+            inventory_monthly = pd.DataFrame()
+        
+        # Get all unique combinations of year_month and officer
+        all_combinations = set()
+        if not purchase_monthly.empty:
+            for _, row in purchase_monthly.iterrows():
+                all_combinations.add((row['YEAR_MONTH'], row['PURCHASE OFFICER NAME']))
+        if not inventory_monthly.empty:
+            for _, row in inventory_monthly.iterrows():
+                all_combinations.add((row['YEAR_MONTH'], row['PURCHASE OFFICER NAME']))
+        
+        # Generate summary for each combination
+        for year_month, officer in sorted(all_combinations):
+            # Get purchase data for this combination
+            purchase_match = purchase_monthly[
+                (purchase_monthly['YEAR_MONTH'] == year_month) & 
+                (purchase_monthly['PURCHASE OFFICER NAME'] == officer)
+            ]
+            
+            # Get inventory data for this combination
+            inventory_match = inventory_monthly[
+                (inventory_monthly['YEAR_MONTH'] == year_month) & 
+                (inventory_monthly['PURCHASE OFFICER NAME'] == officer)
+            ]
+            
+            # Extract values or set to 0 if not found
+            if not purchase_match.empty:
+                p_birds = round(purchase_match.iloc[0]['NUMBER OF BIRDS'], 2)
+                p_chicken = round(purchase_match.iloc[0]['PURCHASED CHICKEN WEIGHT'], 2)
+                p_gizzard = round(purchase_match.iloc[0]['PURCHASED GIZZARD WEIGHT'], 2)
+            else:
+                p_birds = 0
+                p_chicken = 0
+                p_gizzard = 0
+            
+            if not inventory_match.empty:
+                i_birds = round(inventory_match.iloc[0]['NUMBER OF BIRDS'], 2)
+                i_chicken = round(inventory_match.iloc[0]['INVENTORY CHICKEN WEIGHT'], 2)
+                i_gizzard = round(inventory_match.iloc[0]['INVENTORY GIZZARD WEIGHT'], 2)
+            else:
+                i_birds = 0
+                i_chicken = 0
+                i_gizzard = 0
+            
+            summaries.append({
+                'Month': str(year_month),
+                'Purchase Officer': officer,
+                'Purchase Birds Total': p_birds,
+                'Inventory Birds Total': i_birds,
+                'Purchase Chicken Weight Total': p_chicken,
+                'Inventory Chicken Weight Total': i_chicken,
+                'Purchase Gizzard Weight Total': p_gizzard,
+                'Inventory Gizzard Weight Total': i_gizzard
+            })
+        
+        return pd.DataFrame(summaries)
+    
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and customization"""
         try:
@@ -771,21 +852,28 @@ class DiscrepancyAnalyzer:
         print("Generating invoice mismatch report...")
         invoice_report = self.generate_invoice_mismatch_report(purchase_grouped, inventory_processed)
         
+        print("Generating monthly summary report...")
+        monthly_report = self.generate_monthly_summary_report(purchase_grouped, inventory_processed)
+        
         # Update Google Sheets
         print("Updating purchase sheet with reports...")
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Weight Discrepancy Report", weight_report, 
                                 "WEIGHT & BIRD COUNT DISCREPANCY ANALYSIS", "purchase")
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Invoice Mismatch Report", invoice_report, 
                                 "INVOICE MISMATCH ANALYSIS", "purchase")
+        self.update_google_sheet_with_preservation(purchase_sheet_id, "Monthly Summary Report", monthly_report, 
+                                "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
         
         print("Updating inventory sheet with reports...")
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Weight Discrepancy Report", weight_report, 
                                 "WEIGHT & BIRD COUNT DISCREPANCY ANALYSIS", "inventory")
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Invoice Mismatch Report", invoice_report, 
                                 "INVOICE MISMATCH ANALYSIS", "inventory")
+        self.update_google_sheet_with_preservation(inventory_sheet_id, "Monthly Summary Report", monthly_report, 
+                                "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
         
         print("Analysis complete!")
-        return weight_report, invoice_report
+        return weight_report, invoice_report, monthly_report
 
 # Usage
 if __name__ == "__main__":
@@ -800,7 +888,7 @@ if __name__ == "__main__":
     analyzer = DiscrepancyAnalyzer()
     
     # Run analysis
-    weight_report, invoice_report = analyzer.run_analysis(
+    weight_report, invoice_report, monthly_report = analyzer.run_analysis(
         PURCHASE_SHEET_ID, 
         INVENTORY_SHEET_ID
     )
@@ -809,3 +897,4 @@ if __name__ == "__main__":
     print("\n=== ANALYSIS SUMMARY ===")
     print(f"Weight Discrepancies Found: {len(weight_report[weight_report['Status'] != 'Match'])}")
     print(f"Invoice Mismatches Found: {len(invoice_report[invoice_report['Status'] != 'MATCH'])}")
+    print(f"Monthly Summary Records: {len(monthly_report)}")
