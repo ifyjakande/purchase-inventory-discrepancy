@@ -3,7 +3,6 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 import os
 import json
-import tempfile
 
 class DiscrepancyAnalyzer:
     def __init__(self, service_account_json=None):
@@ -422,35 +421,44 @@ class DiscrepancyAnalyzer:
                 'Gizzard Weight Percentage Difference': f"{gizzard_pct}%"
             })
         
-        # Add summary statistics and grand totals
+        # Group summaries by month and add grand totals per month
         summary_df = pd.DataFrame(summaries)
         if not summary_df.empty:
-            # Add grand totals row
-            grand_totals = self._calculate_grand_totals(summary_df)
-            summaries.append(grand_totals)
+            # Group by month and reorganize with monthly grand totals
+            final_summaries = []
             
-            # Add performance analysis rows at the end
-            summary_analysis = self._analyze_monthly_performance(summary_df)
-            for analysis_row in summary_analysis:
-                summaries.append(analysis_row)
+            # Get unique months in order
+            unique_months = summary_df['Month'].unique()
+            
+            for month in unique_months:
+                # Add all officer rows for this month
+                month_rows = summary_df[summary_df['Month'] == month]
+                for _, row in month_rows.iterrows():
+                    final_summaries.append(row.to_dict())
+                
+                # Calculate and add grand total for this month
+                month_grand_total = self._calculate_monthly_grand_total(month_rows, month)
+                final_summaries.append(month_grand_total)
+            
+            return pd.DataFrame(final_summaries)
         
         return pd.DataFrame(summaries)
     
-    def _calculate_grand_totals(self, df):
-        """Calculate grand totals for all numeric columns"""
+    def _calculate_monthly_grand_total(self, month_df, month):
+        """Calculate grand total for a specific month"""
         # Convert numeric strings back to numbers for totaling
         def parse_numeric(value_str):
             if isinstance(value_str, str) and value_str.replace(',', '').replace('.', '').replace('-', '').isdigit():
                 return float(value_str.replace(',', ''))
             return 0
         
-        # Calculate totals for each category
-        total_p_birds = sum(parse_numeric(str(val)) for val in df['Purchase Birds Total'])
-        total_i_birds = sum(parse_numeric(str(val)) for val in df['Inventory Birds Total'])
-        total_p_chicken = sum(parse_numeric(str(val)) for val in df['Purchase Chicken Weight Total'])
-        total_i_chicken = sum(parse_numeric(str(val)) for val in df['Inventory Chicken Weight Total'])
-        total_p_gizzard = sum(parse_numeric(str(val)) for val in df['Purchase Gizzard Weight Total'])
-        total_i_gizzard = sum(parse_numeric(str(val)) for val in df['Inventory Gizzard Weight Total'])
+        # Calculate totals for each category for this month
+        total_p_birds = sum(parse_numeric(str(val)) for val in month_df['Purchase Birds Total'])
+        total_i_birds = sum(parse_numeric(str(val)) for val in month_df['Inventory Birds Total'])
+        total_p_chicken = sum(parse_numeric(str(val)) for val in month_df['Purchase Chicken Weight Total'])
+        total_i_chicken = sum(parse_numeric(str(val)) for val in month_df['Inventory Chicken Weight Total'])
+        total_p_gizzard = sum(parse_numeric(str(val)) for val in month_df['Purchase Gizzard Weight Total'])
+        total_i_gizzard = sum(parse_numeric(str(val)) for val in month_df['Inventory Gizzard Weight Total'])
         
         # Calculate total differences
         total_birds_diff = total_p_birds - total_i_birds
@@ -473,7 +481,7 @@ class DiscrepancyAnalyzer:
         
         return {
             'Month': '',
-            'Purchase Officer': '═══════ GRAND TOTALS ═══════',
+            'Purchase Officer': f'═══════ {month} GRAND TOTAL ═══════',
             'Purchase Birds Total': f"{total_p_birds:,.0f}",
             'Inventory Birds Total': f"{total_i_birds:,.0f}",
             'Birds Difference': f"{total_birds_diff:,.0f}",
@@ -487,113 +495,6 @@ class DiscrepancyAnalyzer:
             'Gizzard Weight Difference': format_weight(total_gizzard_diff),
             'Gizzard Weight Percentage Difference': f"{total_gizzard_pct}%"
         }
-    
-    def _analyze_monthly_performance(self, df):
-        """Analyze monthly performance and identify best/worst performers"""
-        analysis_rows = []
-        
-        # Convert percentage strings back to numbers for analysis
-        df_analysis = df.copy()
-        for col in ['Birds Percentage Difference', 'Chicken Weight Percentage Difference', 'Gizzard Weight Percentage Difference']:
-            df_analysis[col + '_numeric'] = df_analysis[col].str.replace('%', '').astype(float)
-        
-        # Group by officer and calculate average discrepancies
-        officer_performance = df_analysis.groupby('Purchase Officer').agg({
-            'Birds Percentage Difference_numeric': 'mean',
-            'Chicken Weight Percentage Difference_numeric': 'mean', 
-            'Gizzard Weight Percentage Difference_numeric': 'mean'
-        }).round(2)
-        
-        # Find best and worst performers for each category
-        categories = [
-            ('Birds', 'Birds Percentage Difference_numeric'),
-            ('Chicken', 'Chicken Weight Percentage Difference_numeric'),
-            ('Gizzard', 'Gizzard Weight Percentage Difference_numeric')
-        ]
-        
-        # Add spacing rows before performance analysis
-        for i in range(2):
-            analysis_rows.append({
-                'Month': '',
-                'Purchase Officer': '',
-                'Purchase Birds Total': '',
-                'Inventory Birds Total': '',
-                'Birds Difference': '',
-                'Birds Percentage Difference': '',
-                'Purchase Chicken Weight Total': '',
-                'Inventory Chicken Weight Total': '',
-                'Chicken Weight Difference': '',
-                'Chicken Weight Percentage Difference': '',
-                'Purchase Gizzard Weight Total': '',
-                'Inventory Gizzard Weight Total': '',
-                'Gizzard Weight Difference': '',
-                'Gizzard Weight Percentage Difference': ''
-            })
-        
-        # Add separator row
-        analysis_rows.append({
-            'Month': '',
-            'Purchase Officer': '📊 PERFORMANCE ANALYSIS',
-            'Purchase Birds Total': '',
-            'Inventory Birds Total': '',
-            'Birds Difference': '',
-            'Birds Percentage Difference': '',
-            'Purchase Chicken Weight Total': '',
-            'Inventory Chicken Weight Total': '',
-            'Chicken Weight Difference': '',
-            'Chicken Weight Percentage Difference': '',
-            'Purchase Gizzard Weight Total': '',
-            'Inventory Gizzard Weight Total': '',
-            'Gizzard Weight Difference': '',
-            'Gizzard Weight Percentage Difference': ''
-        })
-        
-        for category_name, col_name in categories:
-            # Lowest discrepancy (best performance)
-            best_officer = officer_performance[col_name].abs().idxmin()
-            best_value = officer_performance.loc[best_officer, col_name]
-            
-            # Highest discrepancy (worst performance)
-            worst_officer = officer_performance[col_name].abs().idxmax()
-            worst_value = officer_performance.loc[worst_officer, col_name]
-            
-            # Add best performer row
-            analysis_rows.append({
-                'Month': '',
-                'Purchase Officer': f'🥇 BEST {category_name.upper()} ACCURACY: {best_officer}',
-                'Purchase Birds Total': '',
-                'Inventory Birds Total': '',
-                'Birds Difference': '',
-                'Birds Percentage Difference': f'{best_value}%' if category_name == 'Birds' else '',
-                'Purchase Chicken Weight Total': '',
-                'Inventory Chicken Weight Total': '',
-                'Chicken Weight Difference': '',
-                'Chicken Weight Percentage Difference': f'{best_value}%' if category_name == 'Chicken' else '',
-                'Purchase Gizzard Weight Total': '',
-                'Inventory Gizzard Weight Total': '',
-                'Gizzard Weight Difference': '',
-                'Gizzard Weight Percentage Difference': f'{best_value}%' if category_name == 'Gizzard' else ''
-            })
-            
-            # Add worst performer row
-            analysis_rows.append({
-                'Month': '',
-                'Purchase Officer': f'🔴 NEEDS IMPROVEMENT - {category_name.upper()}: {worst_officer}',
-                'Purchase Birds Total': '',
-                'Inventory Birds Total': '',
-                'Birds Difference': '',
-                'Birds Percentage Difference': f'{worst_value}%' if category_name == 'Birds' else '',
-                'Purchase Chicken Weight Total': '',
-                'Inventory Chicken Weight Total': '',
-                'Chicken Weight Difference': '',
-                'Chicken Weight Percentage Difference': f'{worst_value}%' if category_name == 'Chicken' else '',
-                'Purchase Gizzard Weight Total': '',
-                'Inventory Gizzard Weight Total': '',
-                'Gizzard Weight Difference': '',
-                'Gizzard Weight Percentage Difference': f'{worst_value}%' if category_name == 'Gizzard' else ''
-            })
-        
-        return analysis_rows
     
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and customization"""
@@ -849,7 +750,7 @@ class DiscrepancyAnalyzer:
             
             # Special formatting for Monthly Summary Report
             if 'MONTHLY SUMMARY' in title:
-                self._apply_monthly_summary_formatting(worksheet_id, df, requests, colors)
+                self._apply_monthly_summary_formatting(worksheet_id, df, requests)
             
             # Format data rows based on Status and Resolution Status columns
             elif 'Status' in df.columns:
@@ -963,7 +864,7 @@ class DiscrepancyAnalyzer:
         except Exception as e:
             print(f"Error applying formatting: {e}")
     
-    def _apply_monthly_summary_formatting(self, worksheet_id, df, requests, colors):
+    def _apply_monthly_summary_formatting(self, worksheet_id, df, requests):
         """Apply colorful formatting specific to monthly summary report"""
         try:
             # Enhanced color palette for monthly summary - light and easy on eyes
@@ -974,9 +875,6 @@ class DiscrepancyAnalyzer:
                 'difference_negative': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (same as weight report)
                 'percentage_high': {'red': 1.0, 'green': 0.91, 'blue': 0.91},  # Very light red (same as weight report)
                 'percentage_low': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (same as weight report)
-                'analysis_header': {'red': 0.91, 'green': 0.96, 'blue': 0.99},  # Very light blue (same as header)
-                'best_performer': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (gentle)
-                'worst_performer': {'red': 1.0, 'green': 0.95, 'blue': 0.91},  # Very light orange (gentle alert)
                 'spacing_row': {'red': 1.0, 'green': 1.0, 'blue': 1.0}  # White for spacing
             }
             
@@ -990,7 +888,7 @@ class DiscrepancyAnalyzer:
                 officer_name = str(row_data[df.columns.get_loc('Purchase Officer')])
                 
                 # Special formatting for analysis rows
-                if 'GRAND TOTALS' in officer_name:
+                if 'GRAND TOTAL' in officer_name:
                     # Grand totals row
                     requests.append({
                         'repeatCell': {
@@ -1010,81 +908,6 @@ class DiscrepancyAnalyzer:
                                         'bold': True
                                     },
                                     'horizontalAlignment': 'CENTER'
-                                }
-                            },
-                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                        }
-                    })
-                elif 'PERFORMANCE ANALYSIS' in officer_name:
-                    # Analysis header row
-                    requests.append({
-                        'repeatCell': {
-                            'range': {
-                                'sheetId': worksheet_id,
-                                'startRowIndex': row_idx,
-                                'endRowIndex': row_idx + 1,
-                                'startColumnIndex': 0,
-                                'endColumnIndex': len(df.columns)
-                            },
-                            'cell': {
-                                'userEnteredFormat': {
-                                    'backgroundColor': summary_colors['analysis_header'],
-                                    'textFormat': {
-                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},  # Black text for light background
-                                        'fontSize': 14,
-                                        'bold': True
-                                    },
-                                    'horizontalAlignment': 'CENTER'
-                                }
-                            },
-                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                        }
-                    })
-                elif 'BEST' in officer_name or 'ACCURACY' in officer_name:
-                    # Best performer row
-                    requests.append({
-                        'repeatCell': {
-                            'range': {
-                                'sheetId': worksheet_id,
-                                'startRowIndex': row_idx,
-                                'endRowIndex': row_idx + 1,
-                                'startColumnIndex': 0,
-                                'endColumnIndex': len(df.columns)
-                            },
-                            'cell': {
-                                'userEnteredFormat': {
-                                    'backgroundColor': summary_colors['best_performer'],
-                                    'textFormat': {
-                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},  # Black text for light background
-                                        'fontSize': 11,
-                                        'bold': True
-                                    },
-                                    'horizontalAlignment': 'LEFT'
-                                }
-                            },
-                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                        }
-                    })
-                elif 'NEEDS IMPROVEMENT' in officer_name or 'WORST' in officer_name:
-                    # Needs improvement row
-                    requests.append({
-                        'repeatCell': {
-                            'range': {
-                                'sheetId': worksheet_id,
-                                'startRowIndex': row_idx,
-                                'endRowIndex': row_idx + 1,
-                                'startColumnIndex': 0,
-                                'endColumnIndex': len(df.columns)
-                            },
-                            'cell': {
-                                'userEnteredFormat': {
-                                    'backgroundColor': summary_colors['worst_performer'],
-                                    'textFormat': {
-                                        'foregroundColor': {'red': 0.0, 'green': 0.0, 'blue': 0.0},  # Black text for light background
-                                        'fontSize': 11,
-                                        'bold': True
-                                    },
-                                    'horizontalAlignment': 'LEFT'
                                 }
                             },
                             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
