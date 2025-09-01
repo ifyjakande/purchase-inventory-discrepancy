@@ -489,7 +489,7 @@ class DiscrepancyAnalyzer:
                 'Average Chicken Weight per Day (kg)': f"{row['Average Chicken Weight per Day']:,.2f}",
                 'Average Gizzard Weight per Day (kg)': f"{row['Average Gizzard Weight per Day']:,.2f}",
                 'Total Purchase Days': f"{int(row['Total Purchase Days']):,}",
-                'Performance Rating': self._calculate_data_driven_performance_rating(
+                'Volume Category': self._calculate_data_driven_performance_rating(
                     row['Average Birds per Day'], q75, q50, q25
                 )
             })
@@ -503,15 +503,15 @@ class DiscrepancyAnalyzer:
         return performance_df
     
     def _calculate_data_driven_performance_rating(self, avg_birds, q75, q50, q25):
-        """Calculate performance rating based on data distribution percentiles"""
+        """Calculate volume category based on data distribution percentiles"""
         if avg_birds >= q75:
-            return "High Performer"      # Top 25%
+            return "Highest Volume"      # Top 25%
         elif avg_birds >= q50:
-            return "Good Performer"      # Above median (50th-75th percentile)
+            return "High Volume"         # Above median (50th-75th percentile)
         elif avg_birds >= q25:
-            return "Average Performer"   # Below median but above bottom 25%
+            return "Moderate Volume"     # Below median but above bottom 25%
         else:
-            return "Below Average"       # Bottom 25%
+            return "Lower Volume"        # Bottom 25%
     
     def _calculate_performance_rating(self, avg_birds, avg_chicken, avg_gizzard):
         """Legacy method - kept for backward compatibility"""
@@ -1147,7 +1147,7 @@ class DiscrepancyAnalyzer:
             
             # Get column indices
             officer_col = df.columns.get_loc('Purchase Officer') if 'Purchase Officer' in df.columns else None
-            rating_col = df.columns.get_loc('Performance Rating') if 'Performance Rating' in df.columns else None
+            rating_col = df.columns.get_loc('Volume Category') if 'Volume Category' in df.columns else None
             days_col = df.columns.get_loc('Total Purchase Days') if 'Total Purchase Days' in df.columns else None
             
             # Metric columns (averages)
@@ -1157,12 +1157,12 @@ class DiscrepancyAnalyzer:
                 # Get performance rating for color selection
                 rating = str(row_data[rating_col]) if rating_col is not None else 'Average Performer'
                 
-                # Choose row color based on performance rating
-                if 'High Performer' in rating:
+                # Choose row color based on volume category
+                if 'Highest Volume' in rating:
                     row_bg_color = perf_colors['high_performer']
-                elif 'Good Performer' in rating:
+                elif 'High Volume' in rating:
                     row_bg_color = perf_colors['good_performer']
-                elif 'Below Average' in rating:
+                elif 'Lower Volume' in rating:
                     row_bg_color = perf_colors['below_average']
                 else:
                     row_bg_color = perf_colors['average_performer']
@@ -1265,9 +1265,9 @@ class DiscrepancyAnalyzer:
                         }
                     })
                 
-                # Bold formatting for performance rating column
+                # Bold formatting for volume category column
                 if rating_col is not None:
-                    text_color = {'red': 0.2, 'green': 0.6, 'blue': 0.2} if 'High' in rating else {'red': 0.6, 'green': 0.2, 'blue': 0.2} if 'Below' in rating else {'red': 0.3, 'green': 0.3, 'blue': 0.3}
+                    text_color = {'red': 0.2, 'green': 0.6, 'blue': 0.2} if 'Highest' in rating else {'red': 0.6, 'green': 0.2, 'blue': 0.2} if 'Lower' in rating else {'red': 0.3, 'green': 0.3, 'blue': 0.3}
                     
                     requests.append({
                         'repeatCell': {
