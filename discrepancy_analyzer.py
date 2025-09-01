@@ -470,7 +470,7 @@ class DiscrepancyAnalyzer:
         ]
         
         # Round to appropriate decimal places
-        performance_stats['Average Birds per Day'] = performance_stats['Average Birds per Day'].round(1)
+        performance_stats['Average Birds per Day'] = performance_stats['Average Birds per Day'].round(0)
         performance_stats['Average Chicken Weight per Day'] = performance_stats['Average Chicken Weight per Day'].round(2)
         performance_stats['Average Gizzard Weight per Day'] = performance_stats['Average Gizzard Weight per Day'].round(2)
         
@@ -479,7 +479,7 @@ class DiscrepancyAnalyzer:
         for _, row in performance_stats.iterrows():
             performance_report.append({
                 'Purchase Officer': row['Purchase Officer'],
-                'Average Birds per Day': f"{row['Average Birds per Day']:,.1f}",
+                'Average Birds per Day': f"{row['Average Birds per Day']:,.0f}",
                 'Average Chicken Weight per Day (kg)': f"{row['Average Chicken Weight per Day']:,.2f}",
                 'Average Gizzard Weight per Day (kg)': f"{row['Average Gizzard Weight per Day']:,.2f}",
                 'Total Purchase Days': f"{int(row['Total Purchase Days']):,}",
