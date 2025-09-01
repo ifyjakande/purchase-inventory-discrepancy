@@ -474,6 +474,12 @@ class DiscrepancyAnalyzer:
         performance_stats['Average Chicken Weight per Day'] = performance_stats['Average Chicken Weight per Day'].round(2)
         performance_stats['Average Gizzard Weight per Day'] = performance_stats['Average Gizzard Weight per Day'].round(2)
         
+        # Calculate data-driven performance thresholds
+        bird_averages = performance_stats['Average Birds per Day'].values
+        q75 = float(performance_stats['Average Birds per Day'].quantile(0.75))
+        q50 = float(performance_stats['Average Birds per Day'].quantile(0.50))
+        q25 = float(performance_stats['Average Birds per Day'].quantile(0.25))
+        
         # Format for display
         performance_report = []
         for _, row in performance_stats.iterrows():
@@ -483,10 +489,8 @@ class DiscrepancyAnalyzer:
                 'Average Chicken Weight per Day (kg)': f"{row['Average Chicken Weight per Day']:,.2f}",
                 'Average Gizzard Weight per Day (kg)': f"{row['Average Gizzard Weight per Day']:,.2f}",
                 'Total Purchase Days': f"{int(row['Total Purchase Days']):,}",
-                'Performance Rating': self._calculate_performance_rating(
-                    row['Average Birds per Day'],
-                    row['Average Chicken Weight per Day'],
-                    row['Average Gizzard Weight per Day']
+                'Performance Rating': self._calculate_data_driven_performance_rating(
+                    row['Average Birds per Day'], q75, q50, q25
                 )
             })
         
@@ -498,8 +502,19 @@ class DiscrepancyAnalyzer:
         
         return performance_df
     
+    def _calculate_data_driven_performance_rating(self, avg_birds, q75, q50, q25):
+        """Calculate performance rating based on data distribution percentiles"""
+        if avg_birds >= q75:
+            return "High Performer"      # Top 25%
+        elif avg_birds >= q50:
+            return "Good Performer"      # Above median (50th-75th percentile)
+        elif avg_birds >= q25:
+            return "Average Performer"   # Below median but above bottom 25%
+        else:
+            return "Below Average"       # Bottom 25%
+    
     def _calculate_performance_rating(self, avg_birds, avg_chicken, avg_gizzard):
-        """Calculate a simple performance rating based on averages"""
+        """Legacy method - kept for backward compatibility"""
         # Simple scoring system based primarily on birds, with future expansion capability
         # Note: avg_chicken and avg_gizzard reserved for future enhanced rating algorithm
         if avg_birds >= 150:
