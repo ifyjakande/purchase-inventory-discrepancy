@@ -11,24 +11,28 @@ class DiscrepancyAnalyzer:
         
     def _authenticate(self, service_account_json=None):
         """Authenticate with Google Sheets API"""
-        scope = ['https://www.googleapis.com/auth/spreadsheets']
-        
-        if service_account_json:
-            # Use provided JSON string (for GitHub Actions)
-            service_account_info = json.loads(service_account_json)
-            creds = Credentials.from_service_account_info(service_account_info, scopes=scope)
-        else:
-            # Fallback to environment variable or file
-            service_account_json_env = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
-            if service_account_json_env:
-                service_account_info = json.loads(service_account_json_env)
+        try:
+            scope = ['https://www.googleapis.com/auth/spreadsheets']
+            
+            if service_account_json:
+                # Use provided JSON string (for GitHub Actions)
+                service_account_info = json.loads(service_account_json)
                 creds = Credentials.from_service_account_info(service_account_info, scopes=scope)
             else:
-                # Last fallback to local file (for development)
-                service_account_file = "pullus-pipeline-40a5302e034d.json"
-                creds = Credentials.from_service_account_file(service_account_file, scopes=scope)
-        
-        return gspread.authorize(creds)
+                # Fallback to environment variable or file
+                service_account_json_env = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+                if service_account_json_env:
+                    service_account_info = json.loads(service_account_json_env)
+                    creds = Credentials.from_service_account_info(service_account_info, scopes=scope)
+                else:
+                    # Last fallback to local file (for development)
+                    service_account_file = "pullus-pipeline-40a5302e034d.json"
+                    creds = Credentials.from_service_account_file(service_account_file, scopes=scope)
+            
+            return gspread.authorize(creds)
+        except Exception as e:
+            print("Error: Authentication failed. Please check your credentials configuration.")
+            raise e
     
     def read_sheet_data(self, sheet_id, sheet_name="Sheet1"):
         """Read data from Google Sheet"""
@@ -57,7 +61,7 @@ class DiscrepancyAnalyzer:
             else:
                 return pd.DataFrame()
         except Exception as e:
-            print(f"Error reading sheet {sheet_id}: {e}")
+            print(f"Error reading sheet: {e}")
             return pd.DataFrame()
     
     def process_purchase_data(self, purchase_df):
@@ -444,6 +448,69 @@ class DiscrepancyAnalyzer:
         
         return pd.DataFrame(summaries)
     
+    def generate_purchase_officer_performance_report(self, purchase_grouped):
+        """Generate purchase officer performance report with averages"""
+        if purchase_grouped.empty:
+            return pd.DataFrame()
+        
+        # Calculate averages per purchase officer
+        performance_stats = purchase_grouped.groupby('PURCHASE OFFICER NAME').agg({
+            'NUMBER OF BIRDS': ['mean', 'count'],
+            'PURCHASED CHICKEN WEIGHT': 'mean',
+            'PURCHASED GIZZARD WEIGHT': 'mean'
+        }).reset_index()
+        
+        # Flatten column names
+        performance_stats.columns = [
+            'Purchase Officer',
+            'Average Birds per Day',
+            'Total Working Days',
+            'Average Chicken Weight per Day',
+            'Average Gizzard Weight per Day'
+        ]
+        
+        # Round to appropriate decimal places
+        performance_stats['Average Birds per Day'] = performance_stats['Average Birds per Day'].round(1)
+        performance_stats['Average Chicken Weight per Day'] = performance_stats['Average Chicken Weight per Day'].round(2)
+        performance_stats['Average Gizzard Weight per Day'] = performance_stats['Average Gizzard Weight per Day'].round(2)
+        
+        # Format for display
+        performance_report = []
+        for _, row in performance_stats.iterrows():
+            performance_report.append({
+                'Purchase Officer': row['Purchase Officer'],
+                'Average Birds per Day': f"{row['Average Birds per Day']:,.1f}",
+                'Average Chicken Weight per Day (kg)': f"{row['Average Chicken Weight per Day']:,.2f}",
+                'Average Gizzard Weight per Day (kg)': f"{row['Average Gizzard Weight per Day']:,.2f}",
+                'Total Working Days': f"{int(row['Total Working Days']):,}",
+                'Performance Rating': self._calculate_performance_rating(
+                    row['Average Birds per Day'],
+                    row['Average Chicken Weight per Day'],
+                    row['Average Gizzard Weight per Day']
+                )
+            })
+        
+        # Sort by average birds per day (descending)
+        performance_df = pd.DataFrame(performance_report)
+        performance_df = performance_df.sort_values('Average Birds per Day', 
+                                                   key=lambda x: x.str.replace(',', '').astype(float), 
+                                                   ascending=False).reset_index(drop=True)
+        
+        return performance_df
+    
+    def _calculate_performance_rating(self, avg_birds, avg_chicken, avg_gizzard):
+        """Calculate a simple performance rating based on averages"""
+        # Simple scoring system based primarily on birds, with future expansion capability
+        # Note: avg_chicken and avg_gizzard reserved for future enhanced rating algorithm
+        if avg_birds >= 150:
+            return "High Performer"
+        elif avg_birds >= 100:
+            return "Good Performer" 
+        elif avg_birds >= 50:
+            return "Average Performer"
+        else:
+            return "Below Average"
+    
     def _calculate_monthly_grand_total(self, month_df, month):
         """Calculate grand total for a specific month"""
         # Convert numeric strings back to numbers for totaling
@@ -752,6 +819,10 @@ class DiscrepancyAnalyzer:
             if 'MONTHLY SUMMARY' in title:
                 self._apply_monthly_summary_formatting(worksheet_id, df, requests)
             
+            # Special formatting for Performance Report
+            elif 'PERFORMANCE' in title:
+                self._apply_performance_formatting(worksheet_id, df, requests)
+            
             # Format data rows based on Status and Resolution Status columns
             elif 'Status' in df.columns:
                 status_col_index = df.columns.get_loc('Status')
@@ -1045,6 +1116,170 @@ class DiscrepancyAnalyzer:
         except Exception as e:
             print(f"Error applying monthly summary formatting: {e}")
     
+    def _apply_performance_formatting(self, worksheet_id, df, requests):
+        """Apply colorful formatting specific to performance report"""
+        try:
+            # Unique warm color palette for performance report
+            perf_colors = {
+                'high_performer': {'red': 0.85, 'green': 0.95, 'blue': 0.85},    # Light mint green
+                'good_performer': {'red': 0.90, 'green': 0.95, 'blue': 0.98},   # Very light cyan
+                'average_performer': {'red': 0.95, 'green': 0.90, 'blue': 0.95}, # Light lavender
+                'below_average': {'red': 0.98, 'green': 0.90, 'blue': 0.90},    # Light rose
+                'officer_name': {'red': 0.75, 'green': 0.85, 'blue': 0.95},     # Soft blue
+                'metrics': {'red': 0.95, 'green': 0.95, 'blue': 0.85},          # Light cream
+                'working_days': {'red': 0.88, 'green': 0.92, 'blue': 0.88}      # Soft green
+            }
+            
+            # Get column indices
+            officer_col = df.columns.get_loc('Purchase Officer') if 'Purchase Officer' in df.columns else None
+            rating_col = df.columns.get_loc('Performance Rating') if 'Performance Rating' in df.columns else None
+            days_col = df.columns.get_loc('Total Working Days') if 'Total Working Days' in df.columns else None
+            
+            # Metric columns (averages)
+            metric_cols = [i for i, col in enumerate(df.columns) if 'Average' in col]
+            
+            for row_idx, row_data in enumerate(df.values, 3):  # Starting from row 4 (index 3)
+                # Get performance rating for color selection
+                rating = str(row_data[rating_col]) if rating_col is not None else 'Average Performer'
+                
+                # Choose row color based on performance rating
+                if 'High Performer' in rating:
+                    row_bg_color = perf_colors['high_performer']
+                elif 'Good Performer' in rating:
+                    row_bg_color = perf_colors['good_performer']
+                elif 'Below Average' in rating:
+                    row_bg_color = perf_colors['below_average']
+                else:
+                    row_bg_color = perf_colors['average_performer']
+                
+                # Apply base formatting to entire row
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': row_idx,
+                            'endRowIndex': row_idx + 1,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': row_bg_color,
+                                'textFormat': {
+                                    'fontSize': 10
+                                },
+                                'horizontalAlignment': 'CENTER'
+                            }
+                        },
+                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                    }
+                })
+                
+                # Special formatting for officer name column
+                if officer_col is not None:
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': officer_col,
+                                'endColumnIndex': officer_col + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': perf_colors['officer_name'],
+                                    'textFormat': {
+                                        'fontSize': 11,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'LEFT'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                
+                # Special formatting for metric columns with enhanced colors
+                for col_idx in metric_cols:
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': col_idx,
+                                'endColumnIndex': col_idx + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': perf_colors['metrics'],
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                
+                # Special formatting for working days column
+                if days_col is not None:
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': days_col,
+                                'endColumnIndex': days_col + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': perf_colors['working_days'],
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': False
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                
+                # Bold formatting for performance rating column
+                if rating_col is not None:
+                    text_color = {'red': 0.2, 'green': 0.6, 'blue': 0.2} if 'High' in rating else {'red': 0.6, 'green': 0.2, 'blue': 0.2} if 'Below' in rating else {'red': 0.3, 'green': 0.3, 'blue': 0.3}
+                    
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': rating_col,
+                                'endColumnIndex': rating_col + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': True,
+                                        'foregroundColor': text_color
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(textFormat,horizontalAlignment)'
+                        }
+                    })
+                                
+        except Exception as e:
+            print(f"Error applying performance formatting: {e}")
+    
     def _add_dropdown_validation(self, worksheet, df, title):
         """Add dropdown validation to specific columns"""
         try:
@@ -1142,6 +1377,9 @@ class DiscrepancyAnalyzer:
         print("Generating monthly summary report...")
         monthly_report = self.generate_monthly_summary_report(purchase_grouped, inventory_processed)
         
+        print("Generating purchase officer performance report...")
+        performance_report = self.generate_purchase_officer_performance_report(purchase_grouped)
+        
         # Update Google Sheets
         print("Updating purchase sheet with reports...")
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Weight Discrepancy Report", weight_report, 
@@ -1150,6 +1388,8 @@ class DiscrepancyAnalyzer:
                                 "INVOICE MISMATCH ANALYSIS", "purchase")
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Monthly Summary Report", monthly_report, 
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
+        self.update_google_sheet_with_preservation(purchase_sheet_id, "Purchase Officer Performance", performance_report, 
+                                "PURCHASE OFFICER PERFORMANCE ANALYSIS", "performance")
         
         print("Updating inventory sheet with reports...")
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Weight Discrepancy Report", weight_report, 
@@ -1160,7 +1400,7 @@ class DiscrepancyAnalyzer:
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
         
         print("Analysis complete!")
-        return weight_report, invoice_report, monthly_report
+        return weight_report, invoice_report, monthly_report, performance_report
 
 # Usage
 if __name__ == "__main__":
@@ -1175,7 +1415,7 @@ if __name__ == "__main__":
     analyzer = DiscrepancyAnalyzer()
     
     # Run analysis
-    weight_report, invoice_report, monthly_report = analyzer.run_analysis(
+    weight_report, invoice_report, monthly_report, performance_report = analyzer.run_analysis(
         PURCHASE_SHEET_ID, 
         INVENTORY_SHEET_ID
     )
@@ -1185,3 +1425,4 @@ if __name__ == "__main__":
     print(f"Weight Discrepancies Found: {len(weight_report[weight_report['Status'] != 'Match'])}")
     print(f"Invoice Mismatches Found: {len(invoice_report[invoice_report['Status'] != 'MATCH'])}")
     print(f"Monthly Summary Records: {len(monthly_report)}")
+    print(f"Purchase Officers Analyzed: {len(performance_report)}")
