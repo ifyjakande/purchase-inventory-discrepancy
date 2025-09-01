@@ -464,7 +464,7 @@ class DiscrepancyAnalyzer:
         performance_stats.columns = [
             'Purchase Officer',
             'Average Birds per Day',
-            'Total Working Days',
+            'Total Purchase Days',
             'Average Chicken Weight per Day',
             'Average Gizzard Weight per Day'
         ]
@@ -482,7 +482,7 @@ class DiscrepancyAnalyzer:
                 'Average Birds per Day': f"{row['Average Birds per Day']:,.1f}",
                 'Average Chicken Weight per Day (kg)': f"{row['Average Chicken Weight per Day']:,.2f}",
                 'Average Gizzard Weight per Day (kg)': f"{row['Average Gizzard Weight per Day']:,.2f}",
-                'Total Working Days': f"{int(row['Total Working Days']):,}",
+                'Total Purchase Days': f"{int(row['Total Purchase Days']):,}",
                 'Performance Rating': self._calculate_performance_rating(
                     row['Average Birds per Day'],
                     row['Average Chicken Weight per Day'],
@@ -1133,7 +1133,7 @@ class DiscrepancyAnalyzer:
             # Get column indices
             officer_col = df.columns.get_loc('Purchase Officer') if 'Purchase Officer' in df.columns else None
             rating_col = df.columns.get_loc('Performance Rating') if 'Performance Rating' in df.columns else None
-            days_col = df.columns.get_loc('Total Working Days') if 'Total Working Days' in df.columns else None
+            days_col = df.columns.get_loc('Total Purchase Days') if 'Total Purchase Days' in df.columns else None
             
             # Metric columns (averages)
             metric_cols = [i for i, col in enumerate(df.columns) if 'Average' in col]
