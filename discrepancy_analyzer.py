@@ -3,11 +3,39 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 import os
 import json
+import time
+import random
+from googleapiclient.errors import HttpError
 
 class DiscrepancyAnalyzer:
     def __init__(self, service_account_json=None):
         """Initialize with service account credentials"""
         self.gc = self._authenticate(service_account_json)
+    
+    def _api_call_with_retry(self, func, max_retries=3, base_delay=1):
+        """Execute API call with exponential backoff retry for rate limiting"""
+        for attempt in range(max_retries):
+            try:
+                return func()
+            except Exception as e:
+                # Check for rate limiting errors
+                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                    status_code = e.response.status_code
+                elif 'quota exceeded' in str(e).lower() or 'rate limit' in str(e).lower() or '429' in str(e):
+                    status_code = 429
+                else:
+                    status_code = None
+                
+                if status_code == 429 and attempt < max_retries - 1:
+                    # Exponential backoff with jitter
+                    wait_time = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                    print(f"API rate limit hit, waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}")
+                    time.sleep(wait_time)
+                else:
+                    # Re-raise if not a rate limit error or max retries reached
+                    raise e
+        
+        raise Exception(f"Failed after {max_retries} retries")
         
     def _authenticate(self, service_account_json=None):
         """Authenticate with Google Sheets API"""
@@ -37,10 +65,10 @@ class DiscrepancyAnalyzer:
     def read_sheet_data(self, sheet_id, sheet_name="Sheet1"):
         """Read data from Google Sheet"""
         try:
-            sheet = self.gc.open_by_key(sheet_id)
-            worksheet = sheet.worksheet(sheet_name)
+            sheet = self._api_call_with_retry(lambda: self.gc.open_by_key(sheet_id))
+            worksheet = self._api_call_with_retry(lambda: sheet.worksheet(sheet_name))
             # Get all values and skip first 3 rows
-            all_values = worksheet.get_all_values()
+            all_values = self._api_call_with_retry(lambda: worksheet.get_all_values())
             if len(all_values) > 3:
                 headers = all_values[3]  # Row 4 contains headers
                 data_rows = all_values[4:]  # Data starts from row 5
@@ -581,13 +609,13 @@ class DiscrepancyAnalyzer:
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and customization"""
         try:
-            sheet = self.gc.open_by_key(sheet_id)
+            sheet = self._api_call_with_retry(lambda: self.gc.open_by_key(sheet_id))
             
             # Try to get existing worksheet, create if doesn't exist
             try:
-                worksheet = sheet.worksheet(sheet_name)
+                worksheet = self._api_call_with_retry(lambda: sheet.worksheet(sheet_name))
             except:
-                worksheet = sheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+                worksheet = self._api_call_with_retry(lambda: sheet.add_worksheet(title=sheet_name, rows=1000, cols=20))
             
             # Make a copy of the dataframe to avoid modifying original
             df_copy = df.copy()
@@ -599,11 +627,12 @@ class DiscrepancyAnalyzer:
             df_copy = self._customize_columns_for_sheet(df_copy, sheet_type)
             
             # Clear the worksheet content and formatting
-            worksheet.clear()
+            self._api_call_with_retry(lambda: worksheet.clear())
+            time.sleep(0.5)  # Small delay between operations
             
             # Clear all formatting by applying default formatting to the entire sheet
             try:
-                worksheet.spreadsheet.batch_update({
+                self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
                     'requests': [{
                         'repeatCell': {
                             'range': {
@@ -626,7 +655,8 @@ class DiscrepancyAnalyzer:
                             'fields': 'userEnteredFormat'
                         }
                     }]
-                })
+                }))
+                time.sleep(0.5)  # Small delay after formatting clear
             except Exception as e:
                 print(f"Warning: Could not clear formatting: {e}")
             
@@ -652,7 +682,8 @@ class DiscrepancyAnalyzer:
                 data_to_write.append(row_data)
             
             # Write to sheet
-            worksheet.update(values=data_to_write, range_name='A1')
+            self._api_call_with_retry(lambda: worksheet.update(values=data_to_write, range_name='A1'))
+            time.sleep(0.5)  # Small delay after data write
             
             # Apply formatting
             self._apply_sheet_formatting(worksheet, df_copy, title)
@@ -672,7 +703,7 @@ class DiscrepancyAnalyzer:
             if sheet_type == 'summary':
                 return new_df
             # Read existing data using get_all_values to handle duplicate headers
-            all_values = worksheet.get_all_values()
+            all_values = self._api_call_with_retry(lambda: worksheet.get_all_values())
             if len(all_values) <= 3:  # No data rows
                 return new_df
             
@@ -943,9 +974,10 @@ class DiscrepancyAnalyzer:
             
             # Execute batch update
             if requests:
-                worksheet.spreadsheet.batch_update({
+                self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
                     'requests': requests
-                })
+                }))
+                time.sleep(0.5)  # Small delay after formatting
                 
         except Exception as e:
             print(f"Error applying formatting: {e}")
@@ -1353,9 +1385,10 @@ class DiscrepancyAnalyzer:
             
             # Execute validation requests
             if requests:
-                worksheet.spreadsheet.batch_update({
+                self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
                     'requests': requests
-                })
+                }))
+                time.sleep(0.5)  # Small delay after validation
                 
         except Exception as e:
             print(f"Error adding dropdown validation: {e}")
@@ -1399,18 +1432,29 @@ class DiscrepancyAnalyzer:
         print("Updating purchase sheet with reports...")
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Weight Discrepancy Report", weight_report, 
                                 "WEIGHT & BIRD COUNT DISCREPANCY ANALYSIS", "purchase")
+        time.sleep(1)  # Delay between sheet updates
+        
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Invoice Mismatch Report", invoice_report, 
                                 "INVOICE MISMATCH ANALYSIS", "purchase")
+        time.sleep(1)  # Delay between sheet updates
+        
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Monthly Summary Report", monthly_report, 
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
+        time.sleep(1)  # Delay between sheet updates
+        
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Purchase Officer Performance", performance_report, 
                                 "PURCHASE OFFICER PERFORMANCE ANALYSIS", "performance")
+        time.sleep(1)  # Delay between sheet updates
         
         print("Updating inventory sheet with reports...")
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Weight Discrepancy Report", weight_report, 
                                 "WEIGHT & BIRD COUNT DISCREPANCY ANALYSIS", "inventory")
+        time.sleep(1)  # Delay between sheet updates
+        
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Invoice Mismatch Report", invoice_report, 
                                 "INVOICE MISMATCH ANALYSIS", "inventory")
+        time.sleep(1)  # Delay between sheet updates
+        
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Monthly Summary Report", monthly_report, 
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
         
