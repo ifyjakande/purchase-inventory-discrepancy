@@ -114,7 +114,7 @@ class DiscrepancyAnalyzer:
         return grouped
     
     def process_inventory_data(self, inventory_df):
-        """Process inventory data"""
+        """Process inventory data - sum by day and purchase officer"""
         if inventory_df.empty:
             return pd.DataFrame()
         
@@ -133,7 +133,18 @@ class DiscrepancyAnalyzer:
         
         inventory_df['INVOICE_LIST'] = inventory_df['INVOICE NUMBER'].apply(split_invoices)
         
-        return inventory_df
+        # Group by date and purchase officer, sum the metrics and collect invoice numbers
+        grouped = inventory_df.groupby(['DATE', 'PURCHASE OFFICER NAME']).agg({
+            'NUMBER OF BIRDS': 'sum',
+            'INVENTORY CHICKEN WEIGHT': 'sum',
+            'INVENTORY GIZZARD WEIGHT': 'sum',
+            'INVOICE_LIST': lambda x: [item for sublist in x for item in sublist]  # Flatten all invoice lists
+        }).reset_index()
+        
+        # Reconstruct the INVOICE NUMBER column from the flattened list
+        grouped['INVOICE NUMBER'] = grouped['INVOICE_LIST'].apply(lambda x: ','.join(sorted(set(x))))
+        
+        return grouped
     
     def generate_weight_discrepancy_report(self, purchase_grouped, inventory_df):
         """Generate weight and bird count discrepancy report"""
