@@ -13,29 +13,77 @@ class DiscrepancyAnalyzer:
         self.gc = self._authenticate(service_account_json)
     
     def _api_call_with_retry(self, func, max_retries=3, base_delay=1):
-        """Execute API call with exponential backoff retry for rate limiting"""
+        """Execute API call with exponential backoff retry for rate limiting and server errors"""
         for attempt in range(max_retries):
             try:
                 return func()
             except Exception as e:
-                # Check for rate limiting errors
-                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
-                    status_code = e.response.status_code
-                elif 'quota exceeded' in str(e).lower() or 'rate limit' in str(e).lower() or '429' in str(e):
-                    status_code = 429
-                else:
-                    status_code = None
+                # Extract status code from different error types
+                status_code = None
+                error_message = str(e).lower()
                 
-                if status_code == 429 and attempt < max_retries - 1:
-                    # Exponential backoff with jitter
-                    wait_time = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
-                    print(f"API rate limit hit, waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}")
+                # Check HttpError from googleapiclient
+                if hasattr(e, 'resp') and hasattr(e.resp, 'status'):
+                    status_code = int(e.resp.status)
+                elif hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                    status_code = e.response.status_code
+                elif 'quota exceeded' in error_message or 'rate limit' in error_message or '429' in error_message:
+                    status_code = 429
+                elif 'internal error' in error_message or '500' in error_message:
+                    status_code = 500
+                elif '502' in error_message or 'bad gateway' in error_message:
+                    status_code = 502
+                elif '503' in error_message or 'service unavailable' in error_message:
+                    status_code = 503
+                elif '504' in error_message or 'gateway timeout' in error_message:
+                    status_code = 504
+                
+                # Determine retry strategy based on error type
+                should_retry = False
+                retry_strategy = None
+                
+                if status_code == 429:
+                    # Rate limiting - use full retry count with exponential backoff
+                    should_retry = attempt < max_retries - 1
+                    retry_strategy = "rate_limit"
+                elif status_code in [500, 502, 503, 504]:
+                    # Server errors - use limited retries (max 2) with shorter backoff
+                    server_max_retries = min(2, max_retries)
+                    should_retry = attempt < server_max_retries - 1
+                    retry_strategy = "server_error"
+                
+                if should_retry:
+                    if retry_strategy == "rate_limit":
+                        # Exponential backoff with jitter for rate limits
+                        wait_time = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                        print(f"API rate limit hit (429), waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}")
+                    elif retry_strategy == "server_error":
+                        # Shorter backoff for server errors with jitter
+                        wait_time = (base_delay * (1.5 ** attempt)) + random.uniform(0.5, 1.5)
+                        error_type = {500: "Internal Server Error", 502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout"}.get(status_code, f"Server Error {status_code}")
+                        print(f"Google Sheets API {error_type} ({status_code}), waiting {wait_time:.1f}s before retry {attempt + 1}/2")
+                    
                     time.sleep(wait_time)
                 else:
-                    # Re-raise if not a rate limit error or max retries reached
+                    # Log the error type for debugging
+                    if status_code:
+                        error_type = {
+                            429: "Rate Limit Exceeded", 
+                            500: "Internal Server Error", 
+                            502: "Bad Gateway", 
+                            503: "Service Unavailable", 
+                            504: "Gateway Timeout"
+                        }.get(status_code, f"HTTP Error {status_code}")
+                        print(f"API call failed with {error_type} ({status_code}). Max retries reached.")
+                    
+                    # Re-raise the original exception
                     raise e
         
         raise Exception(f"Failed after {max_retries} retries")
+    
+    def _add_api_delay(self, delay=0.2):
+        """Add small delay between API calls to prevent server overload"""
+        time.sleep(delay)
         
     def _authenticate(self, service_account_json=None):
         """Authenticate with Google Sheets API"""
@@ -63,11 +111,15 @@ class DiscrepancyAnalyzer:
             raise e
     
     def read_sheet_data(self, sheet_id, sheet_name="Sheet1"):
-        """Read data from Google Sheet"""
+        """Read data from Google Sheet with optimized error handling"""
         try:
             sheet = self._api_call_with_retry(lambda: self.gc.open_by_key(sheet_id))
+            self._add_api_delay()
+            
             worksheet = self._api_call_with_retry(lambda: sheet.worksheet(sheet_name))
-            # Get all values and skip first 3 rows
+            self._add_api_delay()
+            
+            # Get all values and skip first 3 rows - use field optimization
             all_values = self._api_call_with_retry(lambda: worksheet.get_all_values())
             if len(all_values) > 3:
                 headers = all_values[3]  # Row 4 contains headers
@@ -618,40 +670,43 @@ class DiscrepancyAnalyzer:
         }
     
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
-        """Update Google Sheet with data preservation and customization"""
+        """Update Google Sheet with data preservation and optimized error handling"""
         try:
             sheet = self._api_call_with_retry(lambda: self.gc.open_by_key(sheet_id))
+            self._add_api_delay()
             
             # Try to get existing worksheet, create if doesn't exist
             try:
                 worksheet = self._api_call_with_retry(lambda: sheet.worksheet(sheet_name))
             except:
                 worksheet = self._api_call_with_retry(lambda: sheet.add_worksheet(title=sheet_name, rows=1000, cols=20))
+                self._add_api_delay()
             
             # Make a copy of the dataframe to avoid modifying original
             df_copy = df.copy()
             
-            # Preserve existing data
+            # Preserve existing data with optimized API calls
             df_copy = self._preserve_existing_data(worksheet, df_copy, sheet_type)
             
             # Customize columns for the specific sheet
             df_copy = self._customize_columns_for_sheet(df_copy, sheet_type)
             
-            # Clear the worksheet content and formatting
+            # Clear the worksheet content and formatting with delay
             self._api_call_with_retry(lambda: worksheet.clear())
-            time.sleep(0.5)  # Small delay between operations
+            self._add_api_delay(0.5)  # Longer delay after clear operation
             
-            # Clear all formatting by applying default formatting to the entire sheet
+            # Clear all formatting with optimized batch size
             try:
+                # Smaller batch size to prevent timeouts
                 self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
                     'requests': [{
                         'repeatCell': {
                             'range': {
                                 'sheetId': worksheet.id,
                                 'startRowIndex': 0,
-                                'endRowIndex': 1000,
+                                'endRowIndex': min(500, len(df_copy) + 10),  # Optimize range size
                                 'startColumnIndex': 0,
-                                'endColumnIndex': 50
+                                'endColumnIndex': min(30, len(df_copy.columns) + 5)  # Optimize column range
                             },
                             'cell': {
                                 'userEnteredFormat': {
@@ -667,17 +722,17 @@ class DiscrepancyAnalyzer:
                         }
                     }]
                 }))
-                time.sleep(0.5)  # Small delay after formatting clear
+                self._add_api_delay(0.3)  # Delay after formatting clear
             except Exception as e:
                 print(f"Warning: Could not clear formatting: {e}")
             
-            # Prepare data with title
+            # Prepare data with title - optimize data preparation
             data_to_write = []
             data_to_write.append([title])  # Title row
             data_to_write.append([])  # Empty row
             data_to_write.append(df_copy.columns.tolist())  # Headers
             
-            # Add data rows
+            # Add data rows with optimized processing
             for row in df_copy.values:
                 # Convert numpy types to Python types for JSON serialization
                 row_data = []
@@ -692,9 +747,13 @@ class DiscrepancyAnalyzer:
                         row_data.append(str(val))
                 data_to_write.append(row_data)
             
-            # Write to sheet
+            # Write to sheet with optimized approach
+            if len(data_to_write) > 1000:
+                # For very large datasets, consider chunking (though unlikely in this use case)
+                print(f"Large dataset detected ({len(data_to_write)} rows). Writing in optimized batch.")
+            
             self._api_call_with_retry(lambda: worksheet.update(values=data_to_write, range_name='A1'))
-            time.sleep(0.5)  # Small delay after data write
+            self._add_api_delay(0.3)  # Delay after data write
             
             # Apply formatting
             self._apply_sheet_formatting(worksheet, df_copy, title)
@@ -708,13 +767,16 @@ class DiscrepancyAnalyzer:
             print(f"Error updating sheet {sheet_name}: {e}")
     
     def _preserve_existing_data(self, worksheet, new_df, sheet_type):
-        """Preserve existing comments and resolution data"""
+        """Preserve existing comments and resolution data with optimized API calls"""
         try:
             # Skip preservation for monthly summary reports - they're pure calculations
             if sheet_type == 'summary':
                 return new_df
-            # Read existing data using get_all_values to handle duplicate headers
+            
+            # Read existing data using get_all_values with delay
             all_values = self._api_call_with_retry(lambda: worksheet.get_all_values())
+            self._add_api_delay(0.1)  # Small delay after reading existing data
+            
             if len(all_values) <= 3:  # No data rows
                 return new_df
             
@@ -983,12 +1045,23 @@ class DiscrepancyAnalyzer:
                 }
             })
             
-            # Execute batch update
+            # Execute batch update with optimized chunking for large request sets
             if requests:
-                self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
-                    'requests': requests
-                }))
-                time.sleep(0.5)  # Small delay after formatting
+                # Split large request batches to prevent timeout
+                chunk_size = 50  # Optimize batch size to prevent 500 errors
+                if len(requests) > chunk_size:
+                    print(f"Large formatting batch detected ({len(requests)} requests). Processing in chunks.")
+                    for i in range(0, len(requests), chunk_size):
+                        chunk = requests[i:i + chunk_size]
+                        self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
+                            'requests': chunk
+                        }))
+                        self._add_api_delay(0.3)  # Delay between chunks
+                else:
+                    self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
+                        'requests': requests
+                    }))
+                    self._add_api_delay(0.2)  # Delay after formatting
                 
         except Exception as e:
             print(f"Error applying formatting: {e}")
@@ -1394,12 +1467,23 @@ class DiscrepancyAnalyzer:
                         }
                     })
             
-            # Execute validation requests
+            # Execute validation requests with chunking
             if requests:
-                self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
-                    'requests': requests
-                }))
-                time.sleep(0.5)  # Small delay after validation
+                # Process validation in smaller chunks to prevent timeouts
+                chunk_size = 10  # Smaller chunks for validation rules
+                if len(requests) > chunk_size:
+                    print(f"Large validation batch detected ({len(requests)} requests). Processing in chunks.")
+                    for i in range(0, len(requests), chunk_size):
+                        chunk = requests[i:i + chunk_size]
+                        self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
+                            'requests': chunk
+                        }))
+                        self._add_api_delay(0.2)  # Delay between validation chunks
+                else:
+                    self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
+                        'requests': requests
+                    }))
+                    self._add_api_delay(0.1)  # Small delay after validation
                 
         except Exception as e:
             print(f"Error adding dropdown validation: {e}")
@@ -1439,32 +1523,32 @@ class DiscrepancyAnalyzer:
         print("Generating purchase officer performance report...")
         performance_report = self.generate_purchase_officer_performance_report(purchase_grouped)
         
-        # Update Google Sheets
+        # Update Google Sheets with optimized delays
         print("Updating purchase sheet with reports...")
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Weight Discrepancy Report", weight_report, 
                                 "WEIGHT & BIRD COUNT DISCREPANCY ANALYSIS", "purchase")
-        time.sleep(1)  # Delay between sheet updates
+        self._add_api_delay(2.0)  # Longer delay between major sheet updates
         
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Invoice Mismatch Report", invoice_report, 
                                 "INVOICE MISMATCH ANALYSIS", "purchase")
-        time.sleep(1)  # Delay between sheet updates
+        self._add_api_delay(2.0)  # Longer delay between major sheet updates
         
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Monthly Summary Report", monthly_report, 
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
-        time.sleep(1)  # Delay between sheet updates
+        self._add_api_delay(2.0)  # Longer delay between major sheet updates
         
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Purchase Officer Performance", performance_report, 
                                 "PURCHASE OFFICER PERFORMANCE ANALYSIS", "performance")
-        time.sleep(1)  # Delay between sheet updates
+        self._add_api_delay(2.0)  # Longer delay between major sheet updates
         
         print("Updating inventory sheet with reports...")
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Weight Discrepancy Report", weight_report, 
                                 "WEIGHT & BIRD COUNT DISCREPANCY ANALYSIS", "inventory")
-        time.sleep(1)  # Delay between sheet updates
+        self._add_api_delay(2.0)  # Longer delay between major sheet updates
         
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Invoice Mismatch Report", invoice_report, 
                                 "INVOICE MISMATCH ANALYSIS", "inventory")
-        time.sleep(1)  # Delay between sheet updates
+        self._add_api_delay(2.0)  # Longer delay between major sheet updates
         
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Monthly Summary Report", monthly_report, 
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
