@@ -1045,23 +1045,12 @@ class DiscrepancyAnalyzer:
                 }
             })
             
-            # Execute batch update with optimized chunking for large request sets
+            # Execute batch update
             if requests:
-                # Split large request batches to prevent timeout
-                chunk_size = 50  # Optimize batch size to prevent 500 errors
-                if len(requests) > chunk_size:
-                    print(f"Large formatting batch detected ({len(requests)} requests). Processing in chunks.")
-                    for i in range(0, len(requests), chunk_size):
-                        chunk = requests[i:i + chunk_size]
-                        self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
-                            'requests': chunk
-                        }))
-                        self._add_api_delay(0.3)  # Delay between chunks
-                else:
-                    self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
-                        'requests': requests
-                    }))
-                    self._add_api_delay(0.2)  # Delay after formatting
+                self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
+                    'requests': requests
+                }))
+                self._add_api_delay(0.5)  # Small delay after formatting
                 
         except Exception as e:
             print(f"Error applying formatting: {e}")
@@ -1467,23 +1456,12 @@ class DiscrepancyAnalyzer:
                         }
                     })
             
-            # Execute validation requests with chunking
+            # Execute validation requests
             if requests:
-                # Process validation in smaller chunks to prevent timeouts
-                chunk_size = 10  # Smaller chunks for validation rules
-                if len(requests) > chunk_size:
-                    print(f"Large validation batch detected ({len(requests)} requests). Processing in chunks.")
-                    for i in range(0, len(requests), chunk_size):
-                        chunk = requests[i:i + chunk_size]
-                        self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
-                            'requests': chunk
-                        }))
-                        self._add_api_delay(0.2)  # Delay between validation chunks
-                else:
-                    self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
-                        'requests': requests
-                    }))
-                    self._add_api_delay(0.1)  # Small delay after validation
+                self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
+                    'requests': requests
+                }))
+                self._add_api_delay(0.5)  # Small delay after validation
                 
         except Exception as e:
             print(f"Error adding dropdown validation: {e}")
