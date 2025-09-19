@@ -679,9 +679,9 @@ class DiscrepancyAnalyzer:
     
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and optimized error handling"""
-        # Add timestamp to title
+        # Separate title and timestamp for better column width management
         timestamp = self._get_wat_timestamp()
-        title_with_timestamp = f"{title} - Last Updated: {timestamp}"
+        timestamp_row = f"Last Updated: {timestamp}"
         try:
             sheet = self._api_call_with_retry(lambda: self.gc.open_by_key(sheet_id))
             self._add_api_delay()
@@ -737,9 +737,10 @@ class DiscrepancyAnalyzer:
             except Exception as e:
                 print(f"Warning: Could not clear formatting: {e}")
             
-            # Prepare data with title - optimize data preparation
+            # Prepare data with separate title and timestamp rows - optimize data preparation
             data_to_write = []
-            data_to_write.append([title_with_timestamp])  # Title row with timestamp
+            data_to_write.append([title])  # Title row
+            data_to_write.append([timestamp_row])  # Timestamp row
             data_to_write.append([])  # Empty row
             data_to_write.append(df_copy.columns.tolist())  # Headers
             
@@ -767,10 +768,10 @@ class DiscrepancyAnalyzer:
             self._add_api_delay(0.3)  # Delay after data write
             
             # Apply formatting
-            self._apply_sheet_formatting(worksheet, df_copy, title_with_timestamp)
+            self._apply_sheet_formatting(worksheet, df_copy, title)
             
             # Add dropdown validation
-            self._add_dropdown_validation(worksheet, df_copy, title_with_timestamp)
+            self._add_dropdown_validation(worksheet, df_copy, title)
             
             print(f"Successfully updated sheet: {sheet_name}")
             
@@ -791,9 +792,9 @@ class DiscrepancyAnalyzer:
             if len(all_values) <= 3:  # No data rows
                 return new_df
             
-            # Skip title and header rows, get data starting from row 4
-            headers = all_values[2]  # Row 3 contains headers (0-indexed)
-            data_rows = all_values[3:]  # Data starts from row 4
+            # Skip title, timestamp and header rows, get data starting from row 5
+            headers = all_values[3]  # Row 4 contains headers (0-indexed)
+            data_rows = all_values[4:]  # Data starts from row 5
             
             if not data_rows:
                 return new_df
@@ -884,6 +885,7 @@ class DiscrepancyAnalyzer:
             # Define colors
             colors = {
                 'title': {'red': 0.18, 'green': 0.33, 'blue': 0.58},  # Dark blue
+                'timestamp': {'red': 0.96, 'green': 0.96, 'blue': 0.96},  # Light gray
                 'header': {'red': 0.91, 'green': 0.96, 'blue': 0.99},  # Light blue
                 'match': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Light green
                 'discrepancy': {'red': 1.0, 'green': 0.95, 'blue': 0.91},  # Light orange
@@ -920,14 +922,40 @@ class DiscrepancyAnalyzer:
                     'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                 }
             })
-            
-            # Format header row (row 3)
+
+            # Format timestamp row (A2)
             requests.append({
                 'repeatCell': {
                     'range': {
                         'sheetId': worksheet_id,
-                        'startRowIndex': 2,
-                        'endRowIndex': 3,
+                        'startRowIndex': 1,
+                        'endRowIndex': 2,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': len(df.columns)
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'backgroundColor': colors['timestamp'],
+                            'textFormat': {
+                                'foregroundColor': {'red': 0.4, 'green': 0.4, 'blue': 0.4},
+                                'fontSize': 10,
+                                'bold': False,
+                                'italic': True
+                            },
+                            'horizontalAlignment': 'RIGHT'
+                        }
+                    },
+                    'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                }
+            })
+            
+            # Format header row (row 4)
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': worksheet_id,
+                        'startRowIndex': 3,
+                        'endRowIndex': 4,
                         'startColumnIndex': 0,
                         'endColumnIndex': len(df.columns)
                     },
@@ -963,7 +991,7 @@ class DiscrepancyAnalyzer:
                 chicken_pct_col = df.columns.get_loc('Chicken Weight Percentage Difference') if 'Chicken Weight Percentage Difference' in df.columns else None
                 gizzard_pct_col = df.columns.get_loc('Gizzard Weight Percentage Difference') if 'Gizzard Weight Percentage Difference' in df.columns else None
                 
-                for row_idx, row_data in enumerate(df.values, 3):  # Starting from row 4 (index 3)
+                for row_idx, row_data in enumerate(df.values, 4):  # Starting from row 5 (index 4)
                     status_value = str(row_data[status_col_index])
                     resolution_status = str(row_data[resolution_col_index]) if resolution_col_index is not None else 'PENDING'
                     
@@ -1086,7 +1114,7 @@ class DiscrepancyAnalyzer:
             difference_cols = [i for i, col in enumerate(df.columns) if 'Difference' in col and '%' not in col]
             percentage_cols = [i for i, col in enumerate(df.columns) if 'Percentage Difference' in col]
             
-            for row_idx, row_data in enumerate(df.values, 3):  # Starting from row 4 (index 3)
+            for row_idx, row_data in enumerate(df.values, 4):  # Starting from row 5 (index 4)
                 officer_name = str(row_data[df.columns.get_loc('Purchase Officer')])
                 
                 # Special formatting for analysis rows
@@ -1269,7 +1297,7 @@ class DiscrepancyAnalyzer:
             # Metric columns (averages)
             metric_cols = [i for i, col in enumerate(df.columns) if 'Average' in col]
             
-            for row_idx, row_data in enumerate(df.values, 3):  # Starting from row 4 (index 3)
+            for row_idx, row_data in enumerate(df.values, 4):  # Starting from row 5 (index 4)
                 # Get performance rating for color selection
                 rating = str(row_data[rating_col]) if rating_col is not None else 'Average Performer'
                 
@@ -1453,12 +1481,12 @@ class DiscrepancyAnalyzer:
                         'strict': False
                     }
                     
-                    # Apply to data range (starting from row 4, excluding headers)
+                    # Apply to data range (starting from row 5, excluding headers)
                     requests.append({
                         'setDataValidation': {
                             'range': {
                                 'sheetId': worksheet_id,
-                                'startRowIndex': 3,  # Row 4 (0-indexed)
+                                'startRowIndex': 4,  # Row 5 (0-indexed)
                                 'endRowIndex': 1000,  # Up to row 1000
                                 'startColumnIndex': col_index,
                                 'endColumnIndex': col_index + 1
