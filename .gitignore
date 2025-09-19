@@ -1,3 +1,28 @@
+# Service account credentials - never commit these!
 *.json
+pullus-pipeline-*.json
+
+# Exception: Allow hash tracking files
+!last_source_hash.json
+
+# OS files
 .DS_Store
+
+# Python cache
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

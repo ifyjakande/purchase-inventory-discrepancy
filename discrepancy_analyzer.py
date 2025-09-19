@@ -6,11 +6,19 @@ import json
 import time
 import random
 from googleapiclient.errors import HttpError
+import pytz
+from datetime import datetime
 
 class DiscrepancyAnalyzer:
     def __init__(self, service_account_json=None):
         """Initialize with service account credentials"""
         self.gc = self._authenticate(service_account_json)
+
+    def _get_wat_timestamp(self):
+        """Get current timestamp in West Africa Time with AM/PM format"""
+        wat_tz = pytz.timezone('Africa/Lagos')
+        now = datetime.now(wat_tz)
+        return now.strftime('%b %d, %Y at %I:%M %p WAT')
     
     def _api_call_with_retry(self, func, max_retries=3, base_delay=1):
         """Execute API call with exponential backoff retry for rate limiting and server errors"""
@@ -95,7 +103,7 @@ class DiscrepancyAnalyzer:
                 service_account_info = json.loads(service_account_json)
                 creds = Credentials.from_service_account_info(service_account_info, scopes=scope)
             else:
-                # Fallback to environment variable or file
+                # Check for GOOGLE_SERVICE_ACCOUNT_JSON (GitHub Actions)
                 service_account_json_env = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
                 if service_account_json_env:
                     service_account_info = json.loads(service_account_json_env)
@@ -671,6 +679,9 @@ class DiscrepancyAnalyzer:
     
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and optimized error handling"""
+        # Add timestamp to title
+        timestamp = self._get_wat_timestamp()
+        title_with_timestamp = f"{title} - Last Updated: {timestamp}"
         try:
             sheet = self._api_call_with_retry(lambda: self.gc.open_by_key(sheet_id))
             self._add_api_delay()
@@ -728,7 +739,7 @@ class DiscrepancyAnalyzer:
             
             # Prepare data with title - optimize data preparation
             data_to_write = []
-            data_to_write.append([title])  # Title row
+            data_to_write.append([title_with_timestamp])  # Title row with timestamp
             data_to_write.append([])  # Empty row
             data_to_write.append(df_copy.columns.tolist())  # Headers
             
@@ -756,10 +767,10 @@ class DiscrepancyAnalyzer:
             self._add_api_delay(0.3)  # Delay after data write
             
             # Apply formatting
-            self._apply_sheet_formatting(worksheet, df_copy, title)
+            self._apply_sheet_formatting(worksheet, df_copy, title_with_timestamp)
             
             # Add dropdown validation
-            self._add_dropdown_validation(worksheet, df_copy, title)
+            self._add_dropdown_validation(worksheet, df_copy, title_with_timestamp)
             
             print(f"Successfully updated sheet: {sheet_name}")
             
@@ -1469,13 +1480,17 @@ class DiscrepancyAnalyzer:
     def run_analysis(self, purchase_sheet_id, inventory_sheet_id):
         """Run the complete analysis"""
         print("Starting discrepancy analysis...")
-        
+
+        # Get configurable sheet names from environment variables
+        purchase_sheet_name = os.getenv('PURCHASE_SHEET_NAME', 'Pullus Purchase Tracker')
+        inventory_sheet_name = os.getenv('INVENTORY_SHEET_NAME', 'Pullus Inventory Tracker')
+
         # Read data from both sheets
-        print("Reading purchase data...")
-        purchase_df = self.read_sheet_data(purchase_sheet_id, "Pullus Purchase Tracker")
-        
-        print("Reading inventory data...")
-        inventory_df = self.read_sheet_data(inventory_sheet_id, "Pullus Inventory Tracker")
+        print(f"Reading purchase data from '{purchase_sheet_name}'...")
+        purchase_df = self.read_sheet_data(purchase_sheet_id, purchase_sheet_name)
+
+        print(f"Reading inventory data from '{inventory_sheet_name}'...")
+        inventory_df = self.read_sheet_data(inventory_sheet_id, inventory_sheet_name)
         
         if purchase_df.empty or inventory_df.empty:
             print("Error: Could not read data from sheets")
