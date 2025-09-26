@@ -1481,12 +1481,12 @@ class DiscrepancyAnalyzer:
                         'strict': False
                     }
                     
-                    # Apply to data range (starting from row 5, excluding headers)
+                    # Apply to data range (starting from row 6, excluding title, timestamp, empty row, and headers)
                     requests.append({
                         'setDataValidation': {
                             'range': {
                                 'sheetId': worksheet_id,
-                                'startRowIndex': 4,  # Row 5 (0-indexed)
+                                'startRowIndex': 5,  # Row 6 (0-indexed) - skip title, timestamp, empty row, and header
                                 'endRowIndex': 1000,  # Up to row 1000
                                 'startColumnIndex': col_index,
                                 'endColumnIndex': col_index + 1
