@@ -158,6 +158,11 @@ def save_hash(combined_hash, purchase_hash, inventory_hash):
 def main():
     """Main function to check for changes in source data."""
     try:
+        # Only run in production/CI environment
+        if not os.getenv('CI'):
+            print("This script should only run in CI/production")
+            sys.exit(1)
+
         # Load .env file first
         load_env_file()
 

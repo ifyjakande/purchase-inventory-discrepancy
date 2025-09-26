@@ -9,6 +9,20 @@ from googleapiclient.errors import HttpError
 import pytz
 from datetime import datetime
 
+def load_env_file():
+    """Load environment variables from .env file if it exists (for local development)."""
+    env_file = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_file):
+        with open(env_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    value = value.strip().strip('"\'')
+                    # Only set if not already in environment (production takes precedence)
+                    if key not in os.environ:
+                        os.environ[key] = value
+
 class DiscrepancyAnalyzer:
     def __init__(self, service_account_json=None):
         """Initialize with service account credentials"""
@@ -1443,13 +1457,35 @@ class DiscrepancyAnalyzer:
         """Add dropdown validation to specific columns"""
         try:
             worksheet_id = worksheet.id
-            
+
+            # Clear ALL data validation from the entire sheet first
+            # Use setDataValidation with no rule specified to reliably clear validation
+            clear_all_validation_request = {
+                'setDataValidation': {
+                    'range': {
+                        'sheetId': worksheet_id
+                        # Not specifying startRowIndex/endRowIndex clears entire sheet
+                    }
+                    # No 'rule' parameter means clear all validation
+                }
+            }
+
+            # Calculate dynamic row count for applying new validation
+            total_rows = len(df) + 10  # Data rows + header rows (4) + buffer (6)
+            max_rows = max(total_rows, 50)  # Ensure minimum of 50 rows for usability
+
+            # Execute the clear all validation request first
+            self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
+                'requests': [clear_all_validation_request]
+            }))
+            self._add_api_delay(0.5)  # Longer delay after clearing all validation
+
             # Define dropdown options (excluding Resolution Date)
             validation_rules = {
                 'Responsible Party': ['Purchase Team', 'Inventory Team', 'Both Teams'],
                 'Resolution Status': ['PENDING', 'RESOLVED', 'IN_PROGRESS', 'ESCALATED']
             }
-            
+
             # Define root cause options based on report type
             if 'Weight' in title or 'BIRD COUNT' in title:
                 validation_rules['Root Cause'] = [
@@ -1463,7 +1499,7 @@ class DiscrepancyAnalyzer:
                     'Late Entry', 'Duplicate Entry', 'Invoice Number Typo', 'Missing Documentation',
                     'Recording Wrong Officer', 'Timing Issue'
                 ]
-            
+
             requests = []
             
             # Add validation for each column that exists in the dataframe
@@ -1481,13 +1517,15 @@ class DiscrepancyAnalyzer:
                         'strict': False
                     }
                     
-                    # Apply to data range (starting from row 6, excluding title, timestamp, empty row, and headers)
+                    # Apply to data range (starting AFTER the header row)
+                    # Row structure: 1=title, 2=timestamp, 3=empty, 4=headers, 5+=data
+                    # In 0-indexed: 0=title, 1=timestamp, 2=empty, 3=headers, 4+=data
                     requests.append({
                         'setDataValidation': {
                             'range': {
                                 'sheetId': worksheet_id,
-                                'startRowIndex': 5,  # Row 6 (0-indexed) - skip title, timestamp, empty row, and header
-                                'endRowIndex': 1000,  # Up to row 1000
+                                'startRowIndex': 4,  # Row 5 (1-based) - first data row, skipping header at row 3 (0-indexed)
+                                'endRowIndex': max_rows,  # Dynamic based on actual data size
                                 'startColumnIndex': col_index,
                                 'endColumnIndex': col_index + 1
                             },
@@ -1579,6 +1617,9 @@ class DiscrepancyAnalyzer:
 
 # Usage
 if __name__ == "__main__":
+    # Load .env file for local development (production environment variables take precedence)
+    load_env_file()
+
     # Configuration from environment variables
     PURCHASE_SHEET_ID = os.getenv('PURCHASE_SHEET_ID')
     INVENTORY_SHEET_ID = os.getenv('INVENTORY_SHEET_ID')
