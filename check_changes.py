@@ -9,7 +9,6 @@ import os
 import sys
 import hashlib
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
 import gspread
 
 def load_env_file():
@@ -145,8 +144,7 @@ def save_hash(combined_hash, purchase_hash, inventory_hash):
         data = {
             'combined_hash': combined_hash,
             'purchase_hash': purchase_hash,
-            'inventory_hash': inventory_hash,
-            'updated_at': hashlib.md5(str(combined_hash).encode()).hexdigest()
+            'inventory_hash': inventory_hash
         }
         with open(hash_file, 'w') as f:
             json.dump(data, f, indent=2)

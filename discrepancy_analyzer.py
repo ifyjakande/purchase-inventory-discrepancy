@@ -120,8 +120,14 @@ class DiscrepancyAnalyzer:
                 # Check for GOOGLE_SERVICE_ACCOUNT_JSON (GitHub Actions)
                 service_account_json_env = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
                 if service_account_json_env:
-                    service_account_info = json.loads(service_account_json_env)
-                    creds = Credentials.from_service_account_info(service_account_info, scopes=scope)
+                    # Check if it's a file path or JSON content
+                    if service_account_json_env.startswith('/') or service_account_json_env.endswith('.json'):
+                        # It's a file path - for local development
+                        creds = Credentials.from_service_account_file(service_account_json_env, scopes=scope)
+                    else:
+                        # It's JSON content - for GitHub Actions
+                        service_account_info = json.loads(service_account_json_env)
+                        creds = Credentials.from_service_account_info(service_account_info, scopes=scope)
                 else:
                     # Last fallback to local file (for development)
                     service_account_file = "pullus-pipeline-40a5302e034d.json"
@@ -625,27 +631,15 @@ class DiscrepancyAnalyzer:
             return "Moderate Volume"     # Below median but above bottom 25%
         else:
             return "Lower Volume"        # Bottom 25%
-    
-    def _calculate_performance_rating(self, avg_birds, avg_chicken, avg_gizzard):
-        """Legacy method - kept for backward compatibility"""
-        # Simple scoring system based primarily on birds, with future expansion capability
-        # Note: avg_chicken and avg_gizzard reserved for future enhanced rating algorithm
-        if avg_birds >= 150:
-            return "High Performer"
-        elif avg_birds >= 100:
-            return "Good Performer" 
-        elif avg_birds >= 50:
-            return "Average Performer"
-        else:
-            return "Below Average"
-    
+
     def _calculate_monthly_grand_total(self, month_df, month):
         """Calculate grand total for a specific month"""
         # Convert numeric strings back to numbers for totaling
         def parse_numeric(value_str):
-            if isinstance(value_str, str) and value_str.replace(',', '').replace('.', '').replace('-', '').isdigit():
-                return float(value_str.replace(',', ''))
-            return 0
+            try:
+                return float(str(value_str).replace(',', ''))
+            except (ValueError, AttributeError):
+                return 0
         
         # Calculate totals for each category for this month
         total_p_birds = sum(parse_numeric(str(val)) for val in month_df['Purchase Birds Total'])
