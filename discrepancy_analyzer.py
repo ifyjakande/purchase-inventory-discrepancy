@@ -723,9 +723,9 @@ class DiscrepancyAnalyzer:
                             'range': {
                                 'sheetId': worksheet.id,
                                 'startRowIndex': 0,
-                                'endRowIndex': min(500, len(df_copy) + 10),  # Optimize range size
+                                'endRowIndex': len(df_copy) + 10,  # Scale with actual data size
                                 'startColumnIndex': 0,
-                                'endColumnIndex': min(30, len(df_copy.columns) + 5)  # Optimize column range
+                                'endColumnIndex': len(df_copy.columns) + 5  # Scale with actual column count
                             },
                             'cell': {
                                 'userEnteredFormat': {
@@ -1465,8 +1465,10 @@ class DiscrepancyAnalyzer:
             }
 
             # Calculate dynamic row count for applying new validation
-            total_rows = len(df) + 10  # Data rows + header rows (4) + buffer (6)
-            max_rows = max(total_rows, 50)  # Ensure minimum of 50 rows for usability
+            # Use larger buffer for bigger datasets to ensure room for growth
+            buffer_size = max(50, len(df) // 10)  # At least 50, or 10% of data size
+            total_rows = len(df) + 4 + buffer_size  # Data rows + header rows + buffer
+            max_rows = max(total_rows, 100)  # Ensure minimum of 100 rows for usability
 
             # Execute the clear all validation request first
             self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
