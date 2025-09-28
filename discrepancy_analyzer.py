@@ -248,9 +248,9 @@ class DiscrepancyAnalyzer:
                 inv_row = inventory_match.iloc[0]
                 
                 # Calculate discrepancies (round to 2 decimal places)
-                bird_diff = round(purchase_row['NUMBER OF BIRDS'] - inv_row['NUMBER OF BIRDS'], 2)
-                chicken_diff = round(purchase_row['PURCHASED CHICKEN WEIGHT'] - inv_row['INVENTORY CHICKEN WEIGHT'], 2)
-                gizzard_diff = round(purchase_row['PURCHASED GIZZARD WEIGHT'] - inv_row['INVENTORY GIZZARD WEIGHT'], 2)
+                bird_diff = round(inv_row['NUMBER OF BIRDS'] - purchase_row['NUMBER OF BIRDS'], 2)
+                chicken_diff = round(inv_row['INVENTORY CHICKEN WEIGHT'] - purchase_row['PURCHASED CHICKEN WEIGHT'], 2)
+                gizzard_diff = round(inv_row['INVENTORY GIZZARD WEIGHT'] - purchase_row['PURCHASED GIZZARD WEIGHT'], 2)
                 
                 # Calculate percentage differences using purchase as baseline
                 bird_pct_diff = round((bird_diff / purchase_row['NUMBER OF BIRDS']) * 100, 2) if purchase_row['NUMBER OF BIRDS'] > 0 else 0
@@ -518,9 +518,9 @@ class DiscrepancyAnalyzer:
                 i_gizzard = 0
             
             # Calculate differences
-            birds_diff = round(p_birds - i_birds, 2)
-            chicken_diff = round(p_chicken - i_chicken, 2)
-            gizzard_diff = round(p_gizzard - i_gizzard, 2)
+            birds_diff = round(i_birds - p_birds, 2)
+            chicken_diff = round(i_chicken - p_chicken, 2)
+            gizzard_diff = round(i_gizzard - p_gizzard, 2)
             
             # Calculate percentage differences
             birds_pct = round((birds_diff / p_birds) * 100, 2) if p_birds > 0 else 0
@@ -650,9 +650,9 @@ class DiscrepancyAnalyzer:
         total_i_gizzard = sum(parse_numeric(str(val)) for val in month_df['Inventory Gizzard Weight Total'])
         
         # Calculate total differences
-        total_birds_diff = total_p_birds - total_i_birds
-        total_chicken_diff = total_p_chicken - total_i_chicken
-        total_gizzard_diff = total_p_gizzard - total_i_gizzard
+        total_birds_diff = total_i_birds - total_p_birds
+        total_chicken_diff = total_i_chicken - total_p_chicken
+        total_gizzard_diff = total_i_gizzard - total_p_gizzard
         
         # Calculate total percentage differences
         total_birds_pct = round((total_birds_diff / total_p_birds) * 100, 2) if total_p_birds > 0 else 0
