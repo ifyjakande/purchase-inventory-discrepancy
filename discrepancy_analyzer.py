@@ -1045,16 +1045,25 @@ class DiscrepancyAnalyzer:
                     })
                     
                     # Check for percentage discrepancies >1% or <-1% and highlight those cells
-                    penalty_color = {'red': 1.0, 'green': 0.6, 'blue': 0.6}  # Light red for penalties
-                    
+                    # Different colors for losses vs gains with enhanced contrast
+                    loss_penalty_color = {'red': 1.0, 'green': 0.8, 'blue': 0.8}  # Medium rose for losses
+                    gain_penalty_color = {'red': 1.0, 'green': 0.85, 'blue': 0.7}  # Medium peach for gains
+
                     for pct_col_idx in [bird_pct_col, chicken_pct_col, gizzard_pct_col]:
                         if pct_col_idx is not None:
                             pct_value_str = str(row_data[pct_col_idx])
                             if pct_value_str != 'N/A' and pct_value_str.endswith('%'):
                                 try:
                                     pct_value = float(pct_value_str.replace('%', ''))
-                                    if pct_value > 1.0 or pct_value < -1.0:
-                                        # Highlight this specific cell with penalty color
+                                    if pct_value < -1.0:  # Significant losses
+                                        penalty_color = loss_penalty_color
+                                    elif pct_value > 1.0:  # Significant gains
+                                        penalty_color = gain_penalty_color
+                                    else:
+                                        penalty_color = None  # No penalty color needed
+
+                                    if penalty_color is not None:
+                                        # Highlight this specific cell with appropriate penalty color
                                         requests.append({
                                             'repeatCell': {
                                                 'range': {
