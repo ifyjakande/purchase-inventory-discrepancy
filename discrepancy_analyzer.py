@@ -341,8 +341,15 @@ class DiscrepancyAnalyzer:
                     'Resolution Status': 'PENDING',
                     'Resolution Date': ''
                 })
-        
-        return pd.DataFrame(discrepancies)
+
+        # Convert to DataFrame and sort by date chronologically
+        df = pd.DataFrame(discrepancies)
+        if not df.empty:
+            # Create temporary datetime column for sorting
+            df['Date_Sort'] = pd.to_datetime(df['Date'], format='%d-%b-%Y')
+            df = df.sort_values('Date_Sort').drop('Date_Sort', axis=1).reset_index(drop=True)
+
+        return df
     
     def generate_invoice_mismatch_report(self, purchase_grouped, inventory_df):
         """Generate invoice mismatch report"""
@@ -446,8 +453,15 @@ class DiscrepancyAnalyzer:
                     'Resolution Status': 'PENDING',
                     'Resolution Date': ''
                 })
-        
-        return pd.DataFrame(mismatches)
+
+        # Convert to DataFrame and sort by date chronologically
+        df = pd.DataFrame(mismatches)
+        if not df.empty:
+            # Create temporary datetime column for sorting
+            df['Date_Sort'] = pd.to_datetime(df['Date'], format='%d-%b-%Y')
+            df = df.sort_values('Date_Sort').drop('Date_Sort', axis=1).reset_index(drop=True)
+
+        return df
     
     def generate_monthly_summary_report(self, purchase_grouped, inventory_df):
         """Generate monthly summary report by purchase officer"""
