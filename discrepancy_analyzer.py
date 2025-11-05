@@ -5,7 +5,6 @@ import os
 import json
 import time
 import random
-from googleapiclient.errors import HttpError
 import pytz
 from datetime import datetime
 
@@ -582,37 +581,46 @@ class DiscrepancyAnalyzer:
         return pd.DataFrame(summaries)
     
     def generate_purchase_officer_performance_report(self, purchase_grouped):
-        """Generate purchase officer performance report with averages"""
+        """Generate purchase officer performance report with averages and totals"""
         if purchase_grouped.empty:
             return pd.DataFrame()
-        
-        # Calculate averages per purchase officer
+
+        # Calculate averages and sums per purchase officer
         performance_stats = purchase_grouped.groupby('PURCHASE OFFICER NAME').agg({
-            'NUMBER OF BIRDS': ['mean', 'count'],
-            'PURCHASED CHICKEN WEIGHT': 'mean',
-            'PURCHASED GIZZARD WEIGHT': 'mean'
+            'NUMBER OF BIRDS': ['mean', 'count', 'sum'],
+            'PURCHASED CHICKEN WEIGHT': ['mean', 'sum'],
+            'PURCHASED GIZZARD WEIGHT': ['mean', 'sum']
         }).reset_index()
-        
+
         # Flatten column names
         performance_stats.columns = [
             'Purchase Officer',
             'Average Birds per Day',
             'Total Purchase Days',
+            'Total Birds',
             'Average Chicken Weight per Day',
-            'Average Gizzard Weight per Day'
+            'Total Chicken Weight',
+            'Average Gizzard Weight per Day',
+            'Total Gizzard Weight'
         ]
-        
+
         # Round to appropriate decimal places
         performance_stats['Average Birds per Day'] = performance_stats['Average Birds per Day'].round(0)
+        performance_stats['Total Birds'] = performance_stats['Total Birds'].round(0)
         performance_stats['Average Chicken Weight per Day'] = performance_stats['Average Chicken Weight per Day'].round(2)
+        performance_stats['Total Chicken Weight'] = performance_stats['Total Chicken Weight'].round(2)
         performance_stats['Average Gizzard Weight per Day'] = performance_stats['Average Gizzard Weight per Day'].round(2)
-        
-        # Calculate data-driven performance thresholds
-        bird_averages = performance_stats['Average Birds per Day'].values
-        q75 = float(performance_stats['Average Birds per Day'].quantile(0.75))
-        q50 = float(performance_stats['Average Birds per Day'].quantile(0.50))
-        q25 = float(performance_stats['Average Birds per Day'].quantile(0.25))
-        
+        performance_stats['Total Gizzard Weight'] = performance_stats['Total Gizzard Weight'].round(2)
+
+        # Calculate combined total (chicken + gizzard)
+        performance_stats['Combined Total'] = (performance_stats['Total Chicken Weight'] +
+                                               performance_stats['Total Gizzard Weight']).round(2)
+
+        # Calculate data-driven performance thresholds based on Combined Total weight
+        q75 = float(performance_stats['Combined Total'].quantile(0.75))
+        q50 = float(performance_stats['Combined Total'].quantile(0.50))
+        q25 = float(performance_stats['Combined Total'].quantile(0.25))
+
         # Format for display
         performance_report = []
         for _, row in performance_stats.iterrows():
@@ -622,29 +630,74 @@ class DiscrepancyAnalyzer:
                 'Average Chicken Weight per Day (kg)': f"{row['Average Chicken Weight per Day']:,.2f}",
                 'Average Gizzard Weight per Day (kg)': f"{row['Average Gizzard Weight per Day']:,.2f}",
                 'Total Purchase Days': f"{int(row['Total Purchase Days']):,}",
+                'Total Birds': f"{row['Total Birds']:,.0f}",
+                'Total Chicken Weight (kg)': f"{row['Total Chicken Weight']:,.2f}",
+                'Total Gizzard Weight (kg)': f"{row['Total Gizzard Weight']:,.2f}",
+                'Combined Total (kg)': f"{row['Combined Total']:,.2f}",
                 'Volume Category': self._calculate_data_driven_performance_rating(
-                    row['Average Birds per Day'], q75, q50, q25
+                    row['Combined Total'], q75, q50, q25
                 )
             })
-        
-        # Sort by average birds per day (descending)
+
+        # Sort by combined total weight (descending)
         performance_df = pd.DataFrame(performance_report)
-        performance_df = performance_df.sort_values('Average Birds per Day', 
-                                                   key=lambda x: x.str.replace(',', '').astype(float), 
+        performance_df = performance_df.sort_values('Combined Total (kg)',
+                                                   key=lambda x: x.str.replace(',', '').astype(float),
                                                    ascending=False).reset_index(drop=True)
-        
+
+        # Add grand total row
+        grand_total_row = self._calculate_performance_grand_total(performance_df)
+        performance_df = pd.concat([performance_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+
         return performance_df
     
-    def _calculate_data_driven_performance_rating(self, avg_birds, q75, q50, q25):
-        """Calculate volume category based on data distribution percentiles"""
-        if avg_birds >= q75:
+    def _calculate_data_driven_performance_rating(self, total_weight, q75, q50, q25):
+        """Calculate volume category based on combined total weight percentiles"""
+        if total_weight >= q75:
             return "Highest Volume"      # Top 25%
-        elif avg_birds >= q50:
+        elif total_weight >= q50:
             return "High Volume"         # Above median (50th-75th percentile)
-        elif avg_birds >= q25:
+        elif total_weight >= q25:
             return "Moderate Volume"     # Below median but above bottom 25%
         else:
             return "Lower Volume"        # Bottom 25%
+
+    def _calculate_performance_grand_total(self, performance_df):
+        """Calculate grand total for performance report"""
+        # Convert numeric strings back to numbers for totaling
+        def parse_numeric(value_str):
+            try:
+                return float(str(value_str).replace(',', ''))
+            except (ValueError, AttributeError):
+                return 0
+
+        # Calculate totals for the new sum columns
+        total_birds = sum(parse_numeric(str(val)) for val in performance_df['Total Birds'])
+        total_chicken_weight = sum(parse_numeric(str(val)) for val in performance_df['Total Chicken Weight (kg)'])
+        total_gizzard_weight = sum(parse_numeric(str(val)) for val in performance_df['Total Gizzard Weight (kg)'])
+        total_combined = sum(parse_numeric(str(val)) for val in performance_df['Combined Total (kg)'])
+
+        # Helper function to format weight with appropriate unit
+        def format_weight(weight):
+            if abs(weight) >= 1000:
+                tonnes_value = weight / 1000
+                unit = "tonne" if abs(tonnes_value) == 1.00 else "tonnes"
+                return f"{tonnes_value:,.2f} {unit}"
+            else:
+                return f"{weight:,.2f} kg"
+
+        return {
+            'Purchase Officer': '═══════ GRAND TOTAL ═══════',
+            'Average Birds per Day': '',
+            'Average Chicken Weight per Day (kg)': '',
+            'Average Gizzard Weight per Day (kg)': '',
+            'Total Purchase Days': '',
+            'Total Birds': f"{total_birds:,.0f}",
+            'Total Chicken Weight (kg)': format_weight(total_chicken_weight),
+            'Total Gizzard Weight (kg)': format_weight(total_gizzard_weight),
+            'Combined Total (kg)': format_weight(total_combined),
+            'Volume Category': ''
+        }
 
     def _calculate_monthly_grand_total(self, month_df, month):
         """Calculate grand total for a specific month"""
@@ -1317,21 +1370,62 @@ class DiscrepancyAnalyzer:
                 'below_average': {'red': 0.98, 'green': 0.90, 'blue': 0.90},    # Light rose
                 'officer_name': {'red': 0.75, 'green': 0.85, 'blue': 0.95},     # Soft blue
                 'metrics': {'red': 0.95, 'green': 0.95, 'blue': 0.85},          # Light cream
-                'working_days': {'red': 0.88, 'green': 0.92, 'blue': 0.88}      # Soft green
+                'working_days': {'red': 0.88, 'green': 0.92, 'blue': 0.88},     # Soft green
+                'total_birds': {'red': 1.0, 'green': 0.90, 'blue': 0.85},       # Light coral/salmon
+                'total_chicken': {'red': 0.89, 'green': 0.95, 'blue': 0.99},    # Light sky blue
+                'total_gizzard': {'red': 0.91, 'green': 0.96, 'blue': 0.91},    # Light mint green
+                'combined_total': {'red': 0.95, 'green': 0.90, 'blue': 0.96}    # Light lavender/purple
             }
-            
+
             # Get column indices
             officer_col = df.columns.get_loc('Purchase Officer') if 'Purchase Officer' in df.columns else None
             rating_col = df.columns.get_loc('Volume Category') if 'Volume Category' in df.columns else None
             days_col = df.columns.get_loc('Total Purchase Days') if 'Total Purchase Days' in df.columns else None
-            
+
+            # New total columns
+            total_birds_col = df.columns.get_loc('Total Birds') if 'Total Birds' in df.columns else None
+            total_chicken_col = df.columns.get_loc('Total Chicken Weight (kg)') if 'Total Chicken Weight (kg)' in df.columns else None
+            total_gizzard_col = df.columns.get_loc('Total Gizzard Weight (kg)') if 'Total Gizzard Weight (kg)' in df.columns else None
+            combined_total_col = df.columns.get_loc('Combined Total (kg)') if 'Combined Total (kg)' in df.columns else None
+
             # Metric columns (averages)
             metric_cols = [i for i, col in enumerate(df.columns) if 'Average' in col]
             
             for row_idx, row_data in enumerate(df.values, 4):  # Starting from row 5 (index 4)
+                # Check if this is the grand total row
+                officer_name = str(row_data[officer_col]) if officer_col is not None else ''
+                is_grand_total = 'GRAND TOTAL' in officer_name
+
+                if is_grand_total:
+                    # Special formatting for grand total row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(df.columns)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': {'red': 0.2, 'green': 0.3, 'blue': 0.6},  # Dark blue
+                                    'textFormat': {
+                                        'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                                        'fontSize': 13,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                    continue  # Skip other formatting for grand total row
+
                 # Get performance rating for color selection
                 rating = str(row_data[rating_col]) if rating_col is not None else 'Average Performer'
-                
+
                 # Choose row color based on volume category
                 if 'Highest Volume' in rating:
                     row_bg_color = perf_colors['high_performer']
@@ -1341,7 +1435,7 @@ class DiscrepancyAnalyzer:
                     row_bg_color = perf_colors['below_average']
                 else:
                     row_bg_color = perf_colors['average_performer']
-                
+
                 # Apply base formatting to entire row
                 requests.append({
                     'repeatCell': {
@@ -1443,7 +1537,7 @@ class DiscrepancyAnalyzer:
                 # Bold formatting for volume category column
                 if rating_col is not None:
                     text_color = {'red': 0.2, 'green': 0.6, 'blue': 0.2} if 'Highest' in rating else {'red': 0.6, 'green': 0.2, 'blue': 0.2} if 'Lower' in rating else {'red': 0.3, 'green': 0.3, 'blue': 0.3}
-                    
+
                     requests.append({
                         'repeatCell': {
                             'range': {
@@ -1466,7 +1560,107 @@ class DiscrepancyAnalyzer:
                             'fields': 'userEnteredFormat(textFormat,horizontalAlignment)'
                         }
                     })
-                                
+
+                # Special formatting for Total Birds column
+                if total_birds_col is not None:
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': total_birds_col,
+                                'endColumnIndex': total_birds_col + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': perf_colors['total_birds'],
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+
+                # Special formatting for Total Chicken Weight column
+                if total_chicken_col is not None:
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': total_chicken_col,
+                                'endColumnIndex': total_chicken_col + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': perf_colors['total_chicken'],
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+
+                # Special formatting for Total Gizzard Weight column
+                if total_gizzard_col is not None:
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': total_gizzard_col,
+                                'endColumnIndex': total_gizzard_col + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': perf_colors['total_gizzard'],
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+
+                # Special formatting for Combined Total column
+                if combined_total_col is not None:
+                    requests.append({
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'startRowIndex': row_idx,
+                                'endRowIndex': row_idx + 1,
+                                'startColumnIndex': combined_total_col,
+                                'endColumnIndex': combined_total_col + 1
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'backgroundColor': perf_colors['combined_total'],
+                                    'textFormat': {
+                                        'fontSize': 10,
+                                        'bold': True
+                                    },
+                                    'horizontalAlignment': 'CENTER'
+                                }
+                            },
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+
         except Exception as e:
             print(f"Error applying performance formatting: {e}")
     
