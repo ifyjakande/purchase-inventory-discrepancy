@@ -707,7 +707,7 @@ class DiscrepancyAnalyzer:
                 return float(str(value_str).replace(',', ''))
             except (ValueError, AttributeError):
                 return 0
-        
+
         # Calculate totals for each category for this month
         total_p_birds = sum(parse_numeric(str(val)) for val in month_df['Purchase Birds Total'])
         total_i_birds = sum(parse_numeric(str(val)) for val in month_df['Inventory Birds Total'])
@@ -715,25 +715,20 @@ class DiscrepancyAnalyzer:
         total_i_chicken = sum(parse_numeric(str(val)) for val in month_df['Inventory Chicken Weight Total'])
         total_p_gizzard = sum(parse_numeric(str(val)) for val in month_df['Purchase Gizzard Weight Total'])
         total_i_gizzard = sum(parse_numeric(str(val)) for val in month_df['Inventory Gizzard Weight Total'])
-        
+
         # Calculate total differences
         total_birds_diff = total_i_birds - total_p_birds
         total_chicken_diff = total_i_chicken - total_p_chicken
         total_gizzard_diff = total_i_gizzard - total_p_gizzard
-        
+
         # Calculate total percentage differences
         total_birds_pct = round((total_birds_diff / total_p_birds) * 100, 2) if total_p_birds > 0 else 0
         total_chicken_pct = round((total_chicken_diff / total_p_chicken) * 100, 2) if total_p_chicken > 0 else 0
         total_gizzard_pct = round((total_gizzard_diff / total_p_gizzard) * 100, 2) if total_p_gizzard > 0 else 0
-        
-        # Helper function to format weight with appropriate unit
+
+        # Helper function to format weight - always use kg (no tonnes conversion)
         def format_weight(weight):
-            if abs(weight) >= 1000:
-                tonnes_value = weight / 1000
-                unit = "tonne" if abs(tonnes_value) == 1.00 else "tonnes"
-                return f"{tonnes_value:,.2f} {unit}"
-            else:
-                return f"{weight:,.2f} kg"
+            return f"{weight:,.2f} kg"
         
         return {
             'Month': '',
@@ -816,6 +811,19 @@ class DiscrepancyAnalyzer:
             data_to_write = []
             data_to_write.append([title])  # Title row
             data_to_write.append([timestamp_row])  # Timestamp row
+
+            # Add Volume Category explainer for performance reports
+            if sheet_type == 'performance':
+                data_to_write.append([])  # Empty row
+                data_to_write.append(['HOW VOLUME CATEGORIES WORK:'])
+                data_to_write.append(['We rank purchase officers based on their Combined Total weight (chicken + gizzard added together).'])
+                data_to_write.append(['Then we divide them into 4 groups:'])
+                data_to_write.append(['Highest Volume = Top 25% (the officers who handled the most weight)'])
+                data_to_write.append(['High Volume = Next 25% (above average, but not the highest)'])
+                data_to_write.append(['Moderate Volume = Next 25% (below average, but not the lowest)'])
+                data_to_write.append(['Lower Volume = Bottom 25% (the officers who handled the least weight)'])
+                data_to_write.append(['This ranking compares all officers against each other, so the categories change as performance changes.'])
+
             data_to_write.append([])  # Empty row
             data_to_write.append(df_copy.columns.tolist())  # Headers
             
@@ -964,15 +972,17 @@ class DiscrepancyAnalyzer:
                 'header': {'red': 0.91, 'green': 0.96, 'blue': 0.99},  # Light blue
                 'match': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Light green
                 'discrepancy': {'red': 1.0, 'green': 0.95, 'blue': 0.91},  # Light orange
-                'missing': {'red': 1.0, 'green': 0.91, 'blue': 0.91}  # Light red
+                'missing': {'red': 1.0, 'green': 0.91, 'blue': 0.91},  # Light red
+                'explainer_header': {'red': 0.95, 'green': 0.95, 'blue': 0.85},  # Light yellow/cream
+                'explainer_text': {'red': 0.98, 'green': 0.98, 'blue': 0.95}  # Very light cream
             }
-            
+
             # Get the worksheet ID
             worksheet_id = worksheet.id
-            
+
             # Prepare batch update requests
             requests = []
-            
+
             # Format title row (A1)
             requests.append({
                 'repeatCell': {
@@ -1023,14 +1033,68 @@ class DiscrepancyAnalyzer:
                     'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                 }
             })
-            
-            # Format header row (row 4)
+
+            # Determine header row index based on whether this is a performance report
+            is_performance = 'PERFORMANCE' in title
+            header_row_index = 12 if is_performance else 3
+
+            # Format explainer section for performance reports
+            if is_performance:
+                # Format explainer header row (row 4 - index 3)
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': 3,
+                            'endRowIndex': 4,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': colors['explainer_header'],
+                                'textFormat': {
+                                    'fontSize': 11,
+                                    'bold': True
+                                },
+                                'horizontalAlignment': 'LEFT'
+                            }
+                        },
+                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                    }
+                })
+
+                # Format explainer text rows (rows 5-11 - indices 4-10)
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': 4,
+                            'endRowIndex': 11,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': colors['explainer_text'],
+                                'textFormat': {
+                                    'fontSize': 10,
+                                    'bold': False
+                                },
+                                'horizontalAlignment': 'LEFT'
+                            }
+                        },
+                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                    }
+                })
+
+            # Format header row
             requests.append({
                 'repeatCell': {
                     'range': {
                         'sheetId': worksheet_id,
-                        'startRowIndex': 3,
-                        'endRowIndex': 4,
+                        'startRowIndex': header_row_index,
+                        'endRowIndex': header_row_index + 1,
                         'startColumnIndex': 0,
                         'endColumnIndex': len(df.columns)
                     },
@@ -1390,8 +1454,12 @@ class DiscrepancyAnalyzer:
 
             # Metric columns (averages)
             metric_cols = [i for i, col in enumerate(df.columns) if 'Average' in col]
-            
-            for row_idx, row_data in enumerate(df.values, 4):  # Starting from row 5 (index 4)
+
+            # Performance reports have explainer section, so data starts at row 14 (index 13)
+            # Regular reports start at row 5 (index 4)
+            data_start_row = 13
+
+            for row_idx, row_data in enumerate(df.values, data_start_row):  # Starting from row 14 (index 13) for performance
                 # Check if this is the grand total row
                 officer_name = str(row_data[officer_col]) if officer_col is not None else ''
                 is_grand_total = 'GRAND TOTAL' in officer_name
