@@ -1177,7 +1177,7 @@ class DiscrepancyAnalyzer:
                     
                     # Check for percentage discrepancies >1% or <-1% and highlight those cells
                     # Different colors for losses vs gains with enhanced contrast
-                    loss_penalty_color = {'red': 1.0, 'green': 0.8, 'blue': 0.8}  # Medium rose for losses
+                    loss_penalty_color = {'red': 1.0, 'green': 0.6, 'blue': 0.6}  # Light red for losses
                     gain_penalty_color = {'red': 1.0, 'green': 0.85, 'blue': 0.7}  # Medium peach for gains
 
                     for pct_col_idx in [bird_pct_col, chicken_pct_col, gizzard_pct_col]:
