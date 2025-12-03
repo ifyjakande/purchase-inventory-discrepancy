@@ -776,18 +776,15 @@ class DiscrepancyAnalyzer:
             self._api_call_with_retry(lambda: worksheet.clear())
             self._add_api_delay(0.5)  # Longer delay after clear operation
             
-            # Clear all formatting with optimized batch size
+            # Clear all formatting for entire sheet
             try:
-                # Smaller batch size to prevent timeouts
+                # Clear formatting for entire sheet (not just current data range) to remove old formatting
                 self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
                     'requests': [{
                         'repeatCell': {
                             'range': {
-                                'sheetId': worksheet.id,
-                                'startRowIndex': 0,
-                                'endRowIndex': len(df_copy) + 10,  # Scale with actual data size
-                                'startColumnIndex': 0,
-                                'endColumnIndex': len(df_copy.columns) + 5  # Scale with actual column count
+                                'sheetId': worksheet.id
+                                # Not specifying row/column limits clears the entire sheet
                             },
                             'cell': {
                                 'userEnteredFormat': {
