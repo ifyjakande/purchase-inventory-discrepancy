@@ -470,10 +470,13 @@ class DiscrepancyAnalyzer:
         if not purchase_grouped.empty:
             purchase_grouped['YEAR_MONTH'] = purchase_grouped['DATE'].dt.to_period('M')
             purchase_monthly = purchase_grouped.groupby(['YEAR_MONTH', 'PURCHASE OFFICER NAME']).agg({
-                'NUMBER OF BIRDS': 'sum',
+                'NUMBER OF BIRDS': ['sum', 'count'],  # count gives us offtake count
                 'PURCHASED CHICKEN WEIGHT': 'sum',
                 'PURCHASED GIZZARD WEIGHT': 'sum'
             }).reset_index()
+            # Flatten column names after multi-level aggregation
+            purchase_monthly.columns = ['YEAR_MONTH', 'PURCHASE OFFICER NAME', 'NUMBER OF BIRDS',
+                                       'OFFTAKE_COUNT', 'PURCHASED CHICKEN WEIGHT', 'PURCHASED GIZZARD WEIGHT']
         else:
             purchase_monthly = pd.DataFrame()
         
@@ -516,10 +519,12 @@ class DiscrepancyAnalyzer:
                 p_birds = round(purchase_match.iloc[0]['NUMBER OF BIRDS'], 2)
                 p_chicken = round(purchase_match.iloc[0]['PURCHASED CHICKEN WEIGHT'], 2)
                 p_gizzard = round(purchase_match.iloc[0]['PURCHASED GIZZARD WEIGHT'], 2)
+                offtake_count = int(purchase_match.iloc[0]['OFFTAKE_COUNT'])
             else:
                 p_birds = 0
                 p_chicken = 0
                 p_gizzard = 0
+                offtake_count = 0
             
             if not inventory_match.empty:
                 i_birds = round(inventory_match.iloc[0]['NUMBER OF BIRDS'], 2)
@@ -543,6 +548,7 @@ class DiscrepancyAnalyzer:
             summaries.append({
                 'Month': str(year_month),
                 'Purchase Officer': officer,
+                'Offtake Count': f"{offtake_count:,}",
                 'Purchase Birds Total': f"{p_birds:,.0f}",
                 'Inventory Birds Total': f"{i_birds:,.0f}",
                 'Birds Difference': f"{birds_diff:,.0f}",
@@ -709,6 +715,7 @@ class DiscrepancyAnalyzer:
                 return 0
 
         # Calculate totals for each category for this month
+        total_offtake = sum(int(parse_numeric(str(val))) for val in month_df['Offtake Count'])
         total_p_birds = sum(parse_numeric(str(val)) for val in month_df['Purchase Birds Total'])
         total_i_birds = sum(parse_numeric(str(val)) for val in month_df['Inventory Birds Total'])
         total_p_chicken = sum(parse_numeric(str(val)) for val in month_df['Purchase Chicken Weight Total'])
@@ -733,6 +740,7 @@ class DiscrepancyAnalyzer:
         return {
             'Month': '',
             'Purchase Officer': f'═══════ {month} GRAND TOTAL ═══════',
+            'Offtake Count': f"{total_offtake:,}",
             'Purchase Birds Total': f"{total_p_birds:,.0f}",
             'Inventory Birds Total': f"{total_i_birds:,.0f}",
             'Birds Difference': f"{total_birds_diff:,.0f}",
@@ -1244,6 +1252,7 @@ class DiscrepancyAnalyzer:
         try:
             # Enhanced color palette for monthly summary - light and easy on eyes
             summary_colors = {
+                'offtake_count': {'red': 0.95, 'green': 0.90, 'blue': 0.98},  # Light lavender/purple
                 'purchase_total': {'red': 0.91, 'green': 0.96, 'blue': 0.99},  # Very light blue (same as weight report)
                 'inventory_total': {'red': 0.91, 'green': 0.96, 'blue': 0.91},  # Very light green (same as weight report)
                 'difference_positive': {'red': 1.0, 'green': 0.95, 'blue': 0.91},  # Very light orange (same as weight report)
@@ -1254,6 +1263,7 @@ class DiscrepancyAnalyzer:
             }
             
             # Get column indices for different types
+            offtake_col = df.columns.get_loc('Offtake Count') if 'Offtake Count' in df.columns else None
             purchase_cols = [i for i, col in enumerate(df.columns) if 'Purchase' in col and 'Total' in col]
             inventory_cols = [i for i, col in enumerate(df.columns) if 'Inventory' in col and 'Total' in col]
             difference_cols = [i for i, col in enumerate(df.columns) if 'Difference' in col and '%' not in col]
@@ -1309,6 +1319,28 @@ class DiscrepancyAnalyzer:
                     })
                 else:
                     # Regular data rows with column-specific formatting
+                    # Format offtake count column
+                    if offtake_col is not None:
+                        requests.append({
+                            'repeatCell': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'startRowIndex': row_idx,
+                                    'endRowIndex': row_idx + 1,
+                                    'startColumnIndex': offtake_col,
+                                    'endColumnIndex': offtake_col + 1
+                                },
+                                'cell': {
+                                    'userEnteredFormat': {
+                                        'backgroundColor': summary_colors['offtake_count'],
+                                        'textFormat': {'fontSize': 10, 'bold': True},
+                                        'horizontalAlignment': 'CENTER'
+                                    }
+                                },
+                                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                            }
+                        })
+
                     # Format purchase total columns
                     for col_idx in purchase_cols:
                         requests.append({
