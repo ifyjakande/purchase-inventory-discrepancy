@@ -26,6 +26,7 @@ class DiscrepancyAnalyzer:
     def __init__(self, service_account_json=None):
         """Initialize with service account credentials"""
         self.gc = self._authenticate(service_account_json)
+        self.purchase_targets_2026 = self._load_purchase_targets()
 
     def _get_wat_timestamp(self):
         """Get current timestamp in West Africa Time with AM/PM format"""
@@ -137,6 +138,21 @@ class DiscrepancyAnalyzer:
             print("Error: Authentication failed. Please check your credentials configuration.")
             raise e
     
+    def _load_purchase_targets(self):
+        """Load 2026 purchase targets from env var (production) or local JSON file."""
+        targets_json = os.getenv('PURCHASE_TARGETS_2026')
+        if targets_json:
+            raw = json.loads(targets_json)
+        else:
+            targets_path = os.path.join(os.path.dirname(__file__), 'purchase_targets_2026.json')
+            if os.path.exists(targets_path):
+                with open(targets_path, 'r') as f:
+                    raw = json.load(f)
+            else:
+                print("Warning: No purchase targets found (env var PURCHASE_TARGETS_2026 or purchase_targets_2026.json)")
+                return {}
+        return {int(k): v for k, v in raw.items()}
+
     def read_sheet_data(self, sheet_id, sheet_name="Sheet1"):
         """Read data from Google Sheet with optimized error handling"""
         try:
@@ -586,6 +602,134 @@ class DiscrepancyAnalyzer:
         
         return pd.DataFrame(summaries)
     
+    def generate_purchase_target_report(self, purchase_grouped):
+        """Generate 2026 purchase target tracker comparing actuals vs targets."""
+        targets = self.purchase_targets_2026
+        if not targets:
+            print("Skipping purchase target report - no targets loaded")
+            return pd.DataFrame()
+
+        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+        # Get 2026 actuals grouped by month
+        actuals = {}
+        if not purchase_grouped.empty:
+            data_2026 = purchase_grouped[purchase_grouped['DATE'].dt.year == 2026].copy()
+            if not data_2026.empty:
+                data_2026['MONTH'] = data_2026['DATE'].dt.month
+                monthly = data_2026.groupby('MONTH').agg({
+                    'NUMBER OF BIRDS': 'sum',
+                    'PURCHASED CHICKEN WEIGHT': 'sum'
+                }).to_dict('index')
+                actuals = monthly
+
+        rows = []
+        cumulative_birds_deficit = 0
+        cumulative_vol_deficit = 0
+
+        for q in range(4):
+            q_target_birds = 0
+            q_actual_birds = 0
+            q_target_vol = 0
+            q_actual_vol = 0
+            q_birds_deficit = 0
+            q_vol_deficit = 0
+
+            for m_in_q in range(3):
+                month_num = q * 3 + m_in_q + 1
+                t = targets.get(month_num, {'birds': 0, 'vol_kg': 0})
+                target_birds = t['birds']
+                target_vol = t['vol_kg']
+
+                actual_birds = round(actuals.get(month_num, {}).get('NUMBER OF BIRDS', 0), 0)
+                actual_vol = round(actuals.get(month_num, {}).get('PURCHASED CHICKEN WEIGHT', 0), 2)
+
+                birds_deficit = target_birds - actual_birds
+                vol_deficit = target_vol - actual_vol
+
+                adjusted_birds = target_birds + cumulative_birds_deficit
+                adjusted_vol = target_vol + cumulative_vol_deficit
+
+                achievement = round((actual_birds / adjusted_birds) * 100, 1) if adjusted_birds > 0 else 0
+
+                rows.append({
+                    'Period': month_names[month_num - 1],
+                    'Target Birds': f"{target_birds:,}",
+                    'Actual Birds': f"{int(actual_birds):,}",
+                    'Birds Deficit': f"{int(birds_deficit):,}",
+                    'Cumulative Birds Deficit': f"{int(cumulative_birds_deficit + birds_deficit):,}",
+                    'Adjusted Birds Target': f"{int(adjusted_birds):,}",
+                    'Target Vol (Kg)': f"{target_vol:,.2f}",
+                    'Actual Vol (Kg)': f"{actual_vol:,.2f}",
+                    'Vol Deficit (Kg)': f"{vol_deficit:,.2f}",
+                    'Cumulative Vol Deficit (Kg)': f"{cumulative_vol_deficit + vol_deficit:,.2f}",
+                    'Adjusted Vol Target (Kg)': f"{adjusted_vol:,.2f}",
+                    'Achievement %': f"{achievement}%"
+                })
+
+                cumulative_birds_deficit += birds_deficit
+                cumulative_vol_deficit += vol_deficit
+
+                q_target_birds += target_birds
+                q_actual_birds += actual_birds
+                q_target_vol += target_vol
+                q_actual_vol += actual_vol
+                q_birds_deficit += birds_deficit
+                q_vol_deficit += vol_deficit
+
+            q_achievement = round((q_actual_birds / q_target_birds) * 100, 1) if q_target_birds > 0 else 0
+            rows.append({
+                'Period': f"Q{q + 1} TOTAL",
+                'Target Birds': f"{int(q_target_birds):,}",
+                'Actual Birds': f"{int(q_actual_birds):,}",
+                'Birds Deficit': f"{int(q_birds_deficit):,}",
+                'Cumulative Birds Deficit': f"{int(cumulative_birds_deficit):,}",
+                'Adjusted Birds Target': '',
+                'Target Vol (Kg)': f"{q_target_vol:,.2f}",
+                'Actual Vol (Kg)': f"{q_actual_vol:,.2f}",
+                'Vol Deficit (Kg)': f"{q_vol_deficit:,.2f}",
+                'Cumulative Vol Deficit (Kg)': f"{cumulative_vol_deficit:,.2f}",
+                'Adjusted Vol Target (Kg)': '',
+                'Achievement %': f"{q_achievement}%"
+            })
+
+            # Spacing row after each quarter (except last)
+            if q < 3:
+                rows.append({col: '' for col in ['Period', 'Target Birds', 'Actual Birds',
+                    'Birds Deficit', 'Cumulative Birds Deficit', 'Adjusted Birds Target',
+                    'Target Vol (Kg)', 'Actual Vol (Kg)', 'Vol Deficit (Kg)',
+                    'Cumulative Vol Deficit (Kg)', 'Adjusted Vol Target (Kg)', 'Achievement %']})
+
+        # Spacing before annual total
+        rows.append({col: '' for col in rows[0].keys()})
+
+        # Annual total
+        annual_target_birds = sum(targets[m]['birds'] for m in range(1, 13))
+        annual_target_vol = sum(targets[m]['vol_kg'] for m in range(1, 13))
+        annual_actual_birds = sum(actuals.get(m, {}).get('NUMBER OF BIRDS', 0) for m in range(1, 13))
+        annual_actual_vol = sum(actuals.get(m, {}).get('PURCHASED CHICKEN WEIGHT', 0) for m in range(1, 13))
+        annual_birds_deficit = annual_target_birds - annual_actual_birds
+        annual_vol_deficit = annual_target_vol - annual_actual_vol
+        annual_achievement = round((annual_actual_birds / annual_target_birds) * 100, 1) if annual_target_birds > 0 else 0
+
+        rows.append({
+            'Period': 'ANNUAL TOTAL',
+            'Target Birds': f"{int(annual_target_birds):,}",
+            'Actual Birds': f"{int(annual_actual_birds):,}",
+            'Birds Deficit': f"{int(annual_birds_deficit):,}",
+            'Cumulative Birds Deficit': f"{int(cumulative_birds_deficit):,}",
+            'Adjusted Birds Target': '',
+            'Target Vol (Kg)': f"{annual_target_vol:,.2f}",
+            'Actual Vol (Kg)': f"{annual_actual_vol:,.2f}",
+            'Vol Deficit (Kg)': f"{annual_vol_deficit:,.2f}",
+            'Cumulative Vol Deficit (Kg)': f"{cumulative_vol_deficit:,.2f}",
+            'Adjusted Vol Target (Kg)': '',
+            'Achievement %': f"{annual_achievement}%"
+        })
+
+        return pd.DataFrame(rows)
+
     def generate_purchase_officer_performance_report(self, purchase_grouped):
         """Generate purchase officer performance report with averages and totals"""
         if purchase_grouped.empty:
@@ -817,8 +961,17 @@ class DiscrepancyAnalyzer:
             data_to_write.append([title])  # Title row
             data_to_write.append([timestamp_row])  # Timestamp row
 
+            # Add explainer for purchase target tracker
+            if sheet_type == 'target_tracker':
+                data_to_write.append([])  # Empty row
+                data_to_write.append(['HOW TO READ THIS REPORT:'])
+                data_to_write.append(['Birds Deficit / Vol Deficit = Target minus Actual. Red text means behind target, green text means ahead.'])
+                data_to_write.append(['Cumulative Deficit = Running total of all deficits from Jan to current month. Shows how far behind (or ahead) overall.'])
+                data_to_write.append(['Adjusted Target = Original monthly target + previous cumulative deficit. This is what you NEED to buy this month to get back on track.'])
+                data_to_write.append(['Achievement % = Actual Birds divided by Adjusted Target. Shows progress against what is needed to catch up, not just the base target.'])
+
             # Add Volume Category explainer for performance reports
-            if sheet_type == 'performance':
+            elif sheet_type == 'performance':
                 data_to_write.append([])  # Empty row
                 data_to_write.append(['HOW VOLUME CATEGORIES WORK:'])
                 data_to_write.append(['We rank purchase officers based on their Combined Total weight (chicken + gizzard added together).'])
@@ -870,7 +1023,7 @@ class DiscrepancyAnalyzer:
         """Preserve existing comments and resolution data with optimized API calls"""
         try:
             # Skip preservation for monthly summary reports - they're pure calculations
-            if sheet_type == 'summary':
+            if sheet_type in ('summary', 'target_tracker'):
                 return new_df
             
             # Read existing data using get_all_values with delay
@@ -1039,12 +1192,67 @@ class DiscrepancyAnalyzer:
                 }
             })
 
-            # Determine header row index based on whether this is a performance report
+            # Determine header row index based on report type
             is_performance = 'PERFORMANCE' in title
-            header_row_index = 12 if is_performance else 3
+            is_target_tracker = 'PURCHASE TARGET' in title
+            if is_performance:
+                header_row_index = 12
+            elif is_target_tracker:
+                header_row_index = 9
+            else:
+                header_row_index = 3
+
+            # Format explainer section for target tracker
+            if is_target_tracker:
+                # Explainer header row (row 4 - index 3)
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': 3,
+                            'endRowIndex': 4,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': colors['explainer_header'],
+                                'textFormat': {
+                                    'fontSize': 11,
+                                    'bold': True
+                                },
+                                'horizontalAlignment': 'LEFT'
+                            }
+                        },
+                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                    }
+                })
+                # Explainer text rows (rows 5-8 - indices 4-7)
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': 4,
+                            'endRowIndex': 8,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': colors['explainer_text'],
+                                'textFormat': {
+                                    'fontSize': 10,
+                                    'bold': False
+                                },
+                                'horizontalAlignment': 'LEFT'
+                            }
+                        },
+                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                    }
+                })
 
             # Format explainer section for performance reports
-            if is_performance:
+            elif is_performance:
                 # Format explainer header row (row 4 - index 3)
                 requests.append({
                     'repeatCell': {
@@ -1124,7 +1332,11 @@ class DiscrepancyAnalyzer:
             # Special formatting for Performance Report
             elif 'PERFORMANCE' in title:
                 self._apply_performance_formatting(worksheet_id, df, requests)
-            
+
+            # Special formatting for Purchase Target Tracker
+            elif 'PURCHASE TARGET' in title:
+                self._apply_target_tracker_formatting(worksheet_id, df, requests)
+
             # Format data rows based on Status and Resolution Status columns
             elif 'Status' in df.columns:
                 status_col_index = df.columns.get_loc('Status')
@@ -1760,7 +1972,132 @@ class DiscrepancyAnalyzer:
 
         except Exception as e:
             print(f"Error applying performance formatting: {e}")
-    
+
+    def _apply_target_tracker_formatting(self, worksheet_id, df, requests):
+        """Apply formatting specific to the purchase target tracker report."""
+        try:
+            colors = {
+                'monthly_bg': {'red': 0.96, 'green': 0.98, 'blue': 1.0},
+                'quarterly_bg': {'red': 0.33, 'green': 0.53, 'blue': 0.80},
+                'annual_bg': {'red': 0.18, 'green': 0.33, 'blue': 0.58},
+                'white': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                'green_bg': {'red': 0.78, 'green': 0.94, 'blue': 0.78},
+                'amber_bg': {'red': 1.0, 'green': 0.93, 'blue': 0.70},
+                'red_bg': {'red': 1.0, 'green': 0.80, 'blue': 0.80},
+                'deficit_red': {'red': 0.85, 'green': 0.20, 'blue': 0.20},
+                'deficit_green': {'red': 0.13, 'green': 0.55, 'blue': 0.13},
+            }
+
+            period_col = df.columns.get_loc('Period')
+            achievement_col = df.columns.get_loc('Achievement %')
+            deficit_cols = [df.columns.get_loc(c) for c in df.columns if 'Deficit' in c]
+            num_cols = len(df.columns)
+
+            # Data starts at row 11 (index 10) due to explainer section
+            for row_idx, row_data in enumerate(df.values, 10):
+                period = str(row_data[period_col])
+
+                if period == '':
+                    # Spacing row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                      'startColumnIndex': 0, 'endColumnIndex': num_cols},
+                            'cell': {'userEnteredFormat': {'backgroundColor': colors['white']}},
+                            'fields': 'userEnteredFormat(backgroundColor)'
+                        }
+                    })
+                elif 'ANNUAL' in period:
+                    # Annual total row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                      'startColumnIndex': 0, 'endColumnIndex': num_cols},
+                            'cell': {'userEnteredFormat': {
+                                'backgroundColor': colors['annual_bg'],
+                                'textFormat': {'foregroundColor': colors['white'], 'fontSize': 13, 'bold': True},
+                                'horizontalAlignment': 'CENTER'
+                            }},
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                elif 'TOTAL' in period:
+                    # Quarterly total row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                      'startColumnIndex': 0, 'endColumnIndex': num_cols},
+                            'cell': {'userEnteredFormat': {
+                                'backgroundColor': colors['quarterly_bg'],
+                                'textFormat': {'foregroundColor': colors['white'], 'fontSize': 11, 'bold': True},
+                                'horizontalAlignment': 'CENTER'
+                            }},
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+                else:
+                    # Monthly data row
+                    requests.append({
+                        'repeatCell': {
+                            'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                      'startColumnIndex': 0, 'endColumnIndex': num_cols},
+                            'cell': {'userEnteredFormat': {
+                                'backgroundColor': colors['monthly_bg'],
+                                'textFormat': {'fontSize': 10},
+                                'horizontalAlignment': 'CENTER'
+                            }},
+                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                        }
+                    })
+
+                    # Achievement % coloring
+                    ach_str = str(row_data[achievement_col]).replace('%', '')
+                    try:
+                        ach_val = float(ach_str)
+                        if ach_val >= 100:
+                            ach_bg = colors['green_bg']
+                        elif ach_val >= 70:
+                            ach_bg = colors['amber_bg']
+                        else:
+                            ach_bg = colors['red_bg']
+                        requests.append({
+                            'repeatCell': {
+                                'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                          'startColumnIndex': achievement_col, 'endColumnIndex': achievement_col + 1},
+                                'cell': {'userEnteredFormat': {
+                                    'backgroundColor': ach_bg,
+                                    'textFormat': {'fontSize': 10, 'bold': True},
+                                    'horizontalAlignment': 'CENTER'
+                                }},
+                                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                            }
+                        })
+                    except ValueError:
+                        pass
+
+                    # Deficit column text coloring
+                    for col_idx in deficit_cols:
+                        val_str = str(row_data[col_idx]).replace(',', '')
+                        try:
+                            val = float(val_str)
+                            text_color = colors['deficit_red'] if val > 0 else colors['deficit_green']
+                            requests.append({
+                                'repeatCell': {
+                                    'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                              'startColumnIndex': col_idx, 'endColumnIndex': col_idx + 1},
+                                    'cell': {'userEnteredFormat': {
+                                        'textFormat': {'foregroundColor': text_color, 'fontSize': 10, 'bold': True},
+                                        'horizontalAlignment': 'CENTER'
+                                    }},
+                                    'fields': 'userEnteredFormat(textFormat,horizontalAlignment)'
+                                }
+                            })
+                        except ValueError:
+                            pass
+
+        except Exception as e:
+            print(f"Error applying target tracker formatting: {e}")
+
     def _add_dropdown_validation(self, worksheet, df, title):
         """Add dropdown validation to specific columns"""
         try:
@@ -1870,7 +2207,7 @@ class DiscrepancyAnalyzer:
         
         if purchase_df.empty or inventory_df.empty:
             print("Error: Could not read data from sheets")
-            return None, None
+            return None, None, None, None, None
         
         # Process data
         print("Processing purchase data...")
@@ -1891,7 +2228,10 @@ class DiscrepancyAnalyzer:
         
         print("Generating purchase officer performance report...")
         performance_report = self.generate_purchase_officer_performance_report(purchase_grouped)
-        
+
+        print("Generating purchase target tracker...")
+        target_report = self.generate_purchase_target_report(purchase_grouped)
+
         # Update Google Sheets with optimized delays
         print("Updating purchase sheet with reports...")
         self.update_google_sheet_with_preservation(purchase_sheet_id, "Weight Discrepancy Report", weight_report, 
@@ -1906,10 +2246,15 @@ class DiscrepancyAnalyzer:
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
         self._add_api_delay(2.0)  # Longer delay between major sheet updates
         
-        self.update_google_sheet_with_preservation(purchase_sheet_id, "Purchase Officer Performance", performance_report, 
+        self.update_google_sheet_with_preservation(purchase_sheet_id, "Purchase Officer Performance", performance_report,
                                 "PURCHASE OFFICER PERFORMANCE ANALYSIS", "performance")
         self._add_api_delay(2.0)  # Longer delay between major sheet updates
-        
+
+        if not target_report.empty:
+            self.update_google_sheet_with_preservation(purchase_sheet_id, "Purchase Target Tracker", target_report,
+                                    "2026 PURCHASE TARGET TRACKER", "target_tracker")
+            self._add_api_delay(2.0)
+
         print("Updating inventory sheet with reports...")
         self.update_google_sheet_with_preservation(inventory_sheet_id, "Weight Discrepancy Report", weight_report, 
                                 "WEIGHT & BIRD COUNT DISCREPANCY ANALYSIS", "inventory")
@@ -1923,7 +2268,7 @@ class DiscrepancyAnalyzer:
                                 "MONTHLY SUMMARY BY PURCHASE OFFICER", "summary")
         
         print("Analysis complete!")
-        return weight_report, invoice_report, monthly_report, performance_report
+        return weight_report, invoice_report, monthly_report, performance_report, target_report
 
 # Usage
 if __name__ == "__main__":
@@ -1941,14 +2286,15 @@ if __name__ == "__main__":
     analyzer = DiscrepancyAnalyzer()
     
     # Run analysis
-    weight_report, invoice_report, monthly_report, performance_report = analyzer.run_analysis(
-        PURCHASE_SHEET_ID, 
+    weight_report, invoice_report, monthly_report, performance_report, target_report = analyzer.run_analysis(
+        PURCHASE_SHEET_ID,
         INVENTORY_SHEET_ID
     )
-    
+
     # Display summary
     print("\n=== ANALYSIS SUMMARY ===")
     print(f"Weight Discrepancies Found: {len(weight_report[weight_report['Status'] != 'Match'])}")
     print(f"Invoice Mismatches Found: {len(invoice_report[invoice_report['Status'] != 'MATCH'])}")
     print(f"Monthly Summary Records: {len(monthly_report)}")
     print(f"Purchase Officers Analyzed: {len(performance_report)}")
+    print(f"Target Tracker Rows: {len(target_report)}")

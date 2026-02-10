@@ -82,5 +82,6 @@ jobs:
         INVENTORY_SHEET_ID: ${{ secrets.INVENTORY_SHEET_ID }}
         PURCHASE_SHEET_NAME: ${{ secrets.PURCHASE_SHEET_NAME }}
         INVENTORY_SHEET_NAME: ${{ secrets.INVENTORY_SHEET_NAME }}
+        PURCHASE_TARGETS_2026: ${{ secrets.PURCHASE_TARGETS_2026 }}
       run: |
         python discrepancy_analyzer.py
