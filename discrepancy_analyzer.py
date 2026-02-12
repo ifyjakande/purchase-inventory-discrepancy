@@ -1392,7 +1392,7 @@ class DiscrepancyAnalyzer:
                         }
                     })
                     
-                    # Check for percentage discrepancies >1% or <-1% and highlight those cells
+                    # Check for percentage discrepancies >0.6% or <-0.6% and highlight those cells
                     # Different colors for losses vs gains with enhanced contrast
                     loss_penalty_color = {'red': 1.0, 'green': 0.6, 'blue': 0.6}  # Light red for losses
                     gain_penalty_color = {'red': 1.0, 'green': 0.85, 'blue': 0.7}  # Medium peach for gains
@@ -1403,9 +1403,9 @@ class DiscrepancyAnalyzer:
                             if pct_value_str != 'N/A' and pct_value_str.endswith('%'):
                                 try:
                                     pct_value = float(pct_value_str.replace('%', ''))
-                                    if pct_value < -1.0:  # Significant losses
+                                    if pct_value < -0.6:  # Significant losses
                                         penalty_color = loss_penalty_color
-                                    elif pct_value > 1.0:  # Significant gains
+                                    elif pct_value > 0.6:  # Significant gains
                                         penalty_color = gain_penalty_color
                                     else:
                                         penalty_color = None  # No penalty color needed
