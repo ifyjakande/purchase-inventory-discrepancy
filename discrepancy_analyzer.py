@@ -972,6 +972,7 @@ class DiscrepancyAnalyzer:
                 data_to_write.append(['Birds Deficit / Vol Deficit = Target minus Actual. Red text means behind target, green text means ahead.'])
                 data_to_write.append(['Cumulative Deficit = Running total of all deficits from Jan to current month. Shows how far behind (or ahead) overall.'])
                 data_to_write.append(['Adjusted Target = Original monthly target + previous cumulative deficit. This is what you NEED to buy this month to get back on track.'])
+                data_to_write.append(['Quarterly / Annual Adjusted Target = Original period target + deficit carried INTO that period (not the sum of monthly Adjusted Targets). Hitting this number means ending the period back on plan. For Q1 and Annual there is no prior deficit, so Adjusted equals the raw Target.'])
                 data_to_write.append(['Achievement % = Actual Birds divided by Adjusted Target. Shows progress against what is needed to catch up, not just the base target.'])
 
             # Add Volume Category explainer for performance reports
