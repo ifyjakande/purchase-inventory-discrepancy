@@ -972,7 +972,8 @@ class DiscrepancyAnalyzer:
                 data_to_write.append(['Birds Deficit / Vol Deficit = Target minus Actual. Red text means behind target, green text means ahead.'])
                 data_to_write.append(['Cumulative Deficit = Running total of all deficits from Jan to current month. Shows how far behind (or ahead) overall.'])
                 data_to_write.append(['Adjusted Target = Original monthly target + previous cumulative deficit. This is what you NEED to buy this month to get back on track.'])
-                data_to_write.append(['Quarterly / Annual Adjusted Target = Original period target + deficit carried INTO that period (not the sum of monthly Adjusted Targets). Hitting this number means ending the period back on plan. For Q1 and Annual there is no prior deficit, so Adjusted equals the raw Target.'])
+                data_to_write.append(['Quarterly / Annual Adjusted Target = period target + deficit carried INTO the period. NOT the sum of monthly Adjusted Targets (that would double-count deficits).'])
+                data_to_write.append(['For Q1 and Annual there is no prior deficit, so Adjusted equals the raw Target — shown for consistency with the other rows.'])
                 data_to_write.append(['Achievement % = Actual Birds divided by Adjusted Target. Shows progress against what is needed to catch up, not just the base target.'])
 
             # Add Volume Category explainer for performance reports
@@ -1203,7 +1204,7 @@ class DiscrepancyAnalyzer:
             if is_performance:
                 header_row_index = 12
             elif is_target_tracker:
-                header_row_index = 9
+                header_row_index = 11
             else:
                 header_row_index = 3
 
@@ -1232,13 +1233,13 @@ class DiscrepancyAnalyzer:
                         'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
                     }
                 })
-                # Explainer text rows (rows 5-8 - indices 4-7)
+                # Explainer text rows (rows 5-10 - indices 4-9)
                 requests.append({
                     'repeatCell': {
                         'range': {
                             'sheetId': worksheet_id,
                             'startRowIndex': 4,
-                            'endRowIndex': 8,
+                            'endRowIndex': 10,
                             'startColumnIndex': 0,
                             'endColumnIndex': len(df.columns)
                         },
@@ -2004,8 +2005,8 @@ class DiscrepancyAnalyzer:
             ]
             num_cols = len(df.columns)
 
-            # Data starts at row 11 (index 10) due to explainer section
-            for row_idx, row_data in enumerate(df.values, 10):
+            # Data starts at row 13 (index 12) due to explainer section
+            for row_idx, row_data in enumerate(df.values, 12):
                 period = str(row_data[period_col])
 
                 if period == '':
