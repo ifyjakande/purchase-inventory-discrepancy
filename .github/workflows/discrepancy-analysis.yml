@@ -19,6 +19,15 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Checkout state branch
+      uses: actions/checkout@v4
+      with:
+        ref: state
+        path: state
+
+    - name: Restore hash file from state branch
+      run: cp state/last_source_hash.json last_source_hash.json
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -47,13 +56,15 @@ jobs:
         fi
         cat check_output.txt
 
-    - name: Commit hash tracking file
+    - name: Commit hash tracking file to state branch
       if: steps.check.outputs.needs_update == 'true'
       run: |
+        cp last_source_hash.json state/last_source_hash.json
+        cd state
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add -f last_source_hash.json
-        git diff --staged --quiet || git commit -m "Update last processed hash [skip ci]"
+        git add last_source_hash.json
+        git diff --staged --quiet || git commit -m "Update last processed hash"
         git push
 
   analyze-discrepancies:
