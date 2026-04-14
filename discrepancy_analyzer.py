@@ -656,15 +656,15 @@ class DiscrepancyAnalyzer:
                 rows.append({
                     'Period': month_names[month_num - 1],
                     'Target Birds': f"{target_birds:,}",
+                    'Adjusted Birds Target': f"{int(adjusted_birds):,}",
                     'Actual Birds': f"{int(actual_birds):,}",
                     'Birds Deficit': f"{int(birds_deficit):,}",
                     'Cumulative Birds Deficit': f"{int(cumulative_birds_deficit + birds_deficit):,}",
-                    'Adjusted Birds Target': f"{int(adjusted_birds):,}",
                     'Target Vol (Kg)': f"{target_vol:,.2f}",
+                    'Adjusted Vol Target (Kg)': f"{adjusted_vol:,.2f}",
                     'Actual Vol (Kg)': f"{actual_vol:,.2f}",
                     'Vol Deficit (Kg)': f"{vol_deficit:,.2f}",
                     'Cumulative Vol Deficit (Kg)': f"{cumulative_vol_deficit + vol_deficit:,.2f}",
-                    'Adjusted Vol Target (Kg)': f"{adjusted_vol:,.2f}",
                     'Achievement %': f"{achievement}%"
                 })
 
@@ -682,24 +682,24 @@ class DiscrepancyAnalyzer:
             rows.append({
                 'Period': f"Q{q + 1} TOTAL",
                 'Target Birds': f"{int(q_target_birds):,}",
+                'Adjusted Birds Target': '',
                 'Actual Birds': f"{int(q_actual_birds):,}",
                 'Birds Deficit': f"{int(q_birds_deficit):,}",
                 'Cumulative Birds Deficit': f"{int(cumulative_birds_deficit):,}",
-                'Adjusted Birds Target': '',
                 'Target Vol (Kg)': f"{q_target_vol:,.2f}",
+                'Adjusted Vol Target (Kg)': '',
                 'Actual Vol (Kg)': f"{q_actual_vol:,.2f}",
                 'Vol Deficit (Kg)': f"{q_vol_deficit:,.2f}",
                 'Cumulative Vol Deficit (Kg)': f"{cumulative_vol_deficit:,.2f}",
-                'Adjusted Vol Target (Kg)': '',
                 'Achievement %': f"{q_achievement}%"
             })
 
             # Spacing row after each quarter (except last)
             if q < 3:
-                rows.append({col: '' for col in ['Period', 'Target Birds', 'Actual Birds',
-                    'Birds Deficit', 'Cumulative Birds Deficit', 'Adjusted Birds Target',
-                    'Target Vol (Kg)', 'Actual Vol (Kg)', 'Vol Deficit (Kg)',
-                    'Cumulative Vol Deficit (Kg)', 'Adjusted Vol Target (Kg)', 'Achievement %']})
+                rows.append({col: '' for col in ['Period', 'Target Birds', 'Adjusted Birds Target',
+                    'Actual Birds', 'Birds Deficit', 'Cumulative Birds Deficit',
+                    'Target Vol (Kg)', 'Adjusted Vol Target (Kg)', 'Actual Vol (Kg)',
+                    'Vol Deficit (Kg)', 'Cumulative Vol Deficit (Kg)', 'Achievement %']})
 
         # Spacing before annual total
         rows.append({col: '' for col in rows[0].keys()})
@@ -716,15 +716,15 @@ class DiscrepancyAnalyzer:
         rows.append({
             'Period': 'ANNUAL TOTAL',
             'Target Birds': f"{int(annual_target_birds):,}",
+            'Adjusted Birds Target': '',
             'Actual Birds': f"{int(annual_actual_birds):,}",
             'Birds Deficit': f"{int(annual_birds_deficit):,}",
             'Cumulative Birds Deficit': f"{int(cumulative_birds_deficit):,}",
-            'Adjusted Birds Target': '',
             'Target Vol (Kg)': f"{annual_target_vol:,.2f}",
+            'Adjusted Vol Target (Kg)': '',
             'Actual Vol (Kg)': f"{annual_actual_vol:,.2f}",
             'Vol Deficit (Kg)': f"{annual_vol_deficit:,.2f}",
             'Cumulative Vol Deficit (Kg)': f"{cumulative_vol_deficit:,.2f}",
-            'Adjusted Vol Target (Kg)': '',
             'Achievement %': f"{annual_achievement}%"
         })
 
@@ -1986,11 +1986,17 @@ class DiscrepancyAnalyzer:
                 'red_bg': {'red': 1.0, 'green': 0.80, 'blue': 0.80},
                 'deficit_red': {'red': 0.85, 'green': 0.20, 'blue': 0.20},
                 'deficit_green': {'red': 0.13, 'green': 0.55, 'blue': 0.13},
+                'adjusted_bg': {'red': 1.0, 'green': 0.95, 'blue': 0.80},
             }
 
             period_col = df.columns.get_loc('Period')
             achievement_col = df.columns.get_loc('Achievement %')
             deficit_cols = [df.columns.get_loc(c) for c in df.columns if 'Deficit' in c]
+            adjusted_cols = [df.columns.get_loc(c) for c in df.columns if c.startswith('Adjusted')]
+            actual_vs_adjusted_pairs = [
+                (df.columns.get_loc('Actual Birds'), df.columns.get_loc('Adjusted Birds Target')),
+                (df.columns.get_loc('Actual Vol (Kg)'), df.columns.get_loc('Adjusted Vol Target (Kg)')),
+            ]
             num_cols = len(df.columns)
 
             # Data starts at row 11 (index 10) due to explainer section
@@ -2085,6 +2091,41 @@ class DiscrepancyAnalyzer:
                                 'repeatCell': {
                                     'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
                                               'startColumnIndex': col_idx, 'endColumnIndex': col_idx + 1},
+                                    'cell': {'userEnteredFormat': {
+                                        'textFormat': {'foregroundColor': text_color, 'fontSize': 10, 'bold': True},
+                                        'horizontalAlignment': 'CENTER'
+                                    }},
+                                    'fields': 'userEnteredFormat(textFormat,horizontalAlignment)'
+                                }
+                            })
+                        except ValueError:
+                            pass
+
+                    # Tint Adjusted Target columns to highlight catch-up targets
+                    for col_idx in adjusted_cols:
+                        requests.append({
+                            'repeatCell': {
+                                'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                          'startColumnIndex': col_idx, 'endColumnIndex': col_idx + 1},
+                                'cell': {'userEnteredFormat': {
+                                    'backgroundColor': colors['adjusted_bg'],
+                                    'textFormat': {'fontSize': 10, 'bold': True},
+                                    'horizontalAlignment': 'CENTER'
+                                }},
+                                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+                            }
+                        })
+
+                    # Color Actual cells based on whether they hit the Adjusted Target
+                    for actual_idx, adjusted_idx in actual_vs_adjusted_pairs:
+                        try:
+                            actual_val = float(str(row_data[actual_idx]).replace(',', ''))
+                            adjusted_val = float(str(row_data[adjusted_idx]).replace(',', ''))
+                            text_color = colors['deficit_green'] if actual_val >= adjusted_val else colors['deficit_red']
+                            requests.append({
+                                'repeatCell': {
+                                    'range': {'sheetId': worksheet_id, 'startRowIndex': row_idx, 'endRowIndex': row_idx + 1,
+                                              'startColumnIndex': actual_idx, 'endColumnIndex': actual_idx + 1},
                                     'cell': {'userEnteredFormat': {
                                         'textFormat': {'foregroundColor': text_color, 'fontSize': 10, 'bold': True},
                                         'horizontalAlignment': 'CENTER'
