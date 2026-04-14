@@ -635,6 +635,8 @@ class DiscrepancyAnalyzer:
             q_actual_vol = 0
             q_birds_deficit = 0
             q_vol_deficit = 0
+            q_start_birds_deficit = cumulative_birds_deficit
+            q_start_vol_deficit = cumulative_vol_deficit
 
             for m_in_q in range(3):
                 month_num = q * 3 + m_in_q + 1
@@ -678,16 +680,18 @@ class DiscrepancyAnalyzer:
                 q_birds_deficit += birds_deficit
                 q_vol_deficit += vol_deficit
 
-            q_achievement = round((q_actual_birds / q_target_birds) * 100, 1) if q_target_birds > 0 else 0
+            adjusted_q_target_birds = q_target_birds + q_start_birds_deficit
+            adjusted_q_target_vol = q_target_vol + q_start_vol_deficit
+            q_achievement = round((q_actual_birds / adjusted_q_target_birds) * 100, 1) if adjusted_q_target_birds > 0 else 0
             rows.append({
                 'Period': f"Q{q + 1} TOTAL",
                 'Target Birds': f"{int(q_target_birds):,}",
-                'Adjusted Birds Target': '',
+                'Adjusted Birds Target': f"{int(adjusted_q_target_birds):,}" if q_start_birds_deficit != 0 else '',
                 'Actual Birds': f"{int(q_actual_birds):,}",
                 'Birds Deficit': f"{int(q_birds_deficit):,}",
                 'Cumulative Birds Deficit': f"{int(cumulative_birds_deficit):,}",
                 'Target Vol (Kg)': f"{q_target_vol:,.2f}",
-                'Adjusted Vol Target (Kg)': '',
+                'Adjusted Vol Target (Kg)': f"{adjusted_q_target_vol:,.2f}" if q_start_vol_deficit != 0 else '',
                 'Actual Vol (Kg)': f"{q_actual_vol:,.2f}",
                 'Vol Deficit (Kg)': f"{q_vol_deficit:,.2f}",
                 'Cumulative Vol Deficit (Kg)': f"{cumulative_vol_deficit:,.2f}",
