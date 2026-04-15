@@ -1210,102 +1210,23 @@ class DiscrepancyAnalyzer:
 
             # Format explainer section for target tracker
             if is_target_tracker:
-                # Explainer header row (row 4 - index 3)
-                requests.append({
-                    'repeatCell': {
-                        'range': {
-                            'sheetId': worksheet_id,
-                            'startRowIndex': 3,
-                            'endRowIndex': 4,
-                            'startColumnIndex': 0,
-                            'endColumnIndex': len(df.columns)
-                        },
-                        'cell': {
-                            'userEnteredFormat': {
-                                'backgroundColor': colors['explainer_header'],
-                                'textFormat': {
-                                    'fontSize': 11,
-                                    'bold': True
-                                },
-                                'horizontalAlignment': 'LEFT'
-                            }
-                        },
-                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                    }
-                })
-                # Explainer text rows (rows 5-10 - indices 4-9)
-                requests.append({
-                    'repeatCell': {
-                        'range': {
-                            'sheetId': worksheet_id,
-                            'startRowIndex': 4,
-                            'endRowIndex': 10,
-                            'startColumnIndex': 0,
-                            'endColumnIndex': len(df.columns)
-                        },
-                        'cell': {
-                            'userEnteredFormat': {
-                                'backgroundColor': colors['explainer_text'],
-                                'textFormat': {
-                                    'fontSize': 10,
-                                    'bold': False
-                                },
-                                'horizontalAlignment': 'LEFT'
-                            }
-                        },
-                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                    }
-                })
+                self._format_explainer_block(
+                    worksheet_id, requests, colors,
+                    header_row_idx=3,
+                    text_start_idx=4,
+                    text_end_idx=10,
+                    num_columns=len(df.columns),
+                )
 
             # Format explainer section for performance reports
             elif is_performance:
-                # Format explainer header row (row 4 - index 3)
-                requests.append({
-                    'repeatCell': {
-                        'range': {
-                            'sheetId': worksheet_id,
-                            'startRowIndex': 3,
-                            'endRowIndex': 4,
-                            'startColumnIndex': 0,
-                            'endColumnIndex': len(df.columns)
-                        },
-                        'cell': {
-                            'userEnteredFormat': {
-                                'backgroundColor': colors['explainer_header'],
-                                'textFormat': {
-                                    'fontSize': 11,
-                                    'bold': True
-                                },
-                                'horizontalAlignment': 'LEFT'
-                            }
-                        },
-                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                    }
-                })
-
-                # Format explainer text rows (rows 5-11 - indices 4-10)
-                requests.append({
-                    'repeatCell': {
-                        'range': {
-                            'sheetId': worksheet_id,
-                            'startRowIndex': 4,
-                            'endRowIndex': 11,
-                            'startColumnIndex': 0,
-                            'endColumnIndex': len(df.columns)
-                        },
-                        'cell': {
-                            'userEnteredFormat': {
-                                'backgroundColor': colors['explainer_text'],
-                                'textFormat': {
-                                    'fontSize': 10,
-                                    'bold': False
-                                },
-                                'horizontalAlignment': 'LEFT'
-                            }
-                        },
-                        'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                    }
-                })
+                self._format_explainer_block(
+                    worksheet_id, requests, colors,
+                    header_row_idx=3,
+                    text_start_idx=4,
+                    text_end_idx=11,
+                    num_columns=len(df.columns),
+                )
 
             # Format header row
             requests.append({
@@ -1454,7 +1375,97 @@ class DiscrepancyAnalyzer:
                     }
                 }
             })
-            
+
+            # For Purchase Target Tracker, keep every column visible at first glance:
+            # wrap the header row and cap data columns at a compact width so long
+            # header names stack vertically instead of stretching the sheet.
+            if is_target_tracker:
+                # Wrap + center the header row (allows multi-line headers)
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': header_row_index,
+                            'endRowIndex': header_row_index + 1,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'wrapStrategy': 'WRAP',
+                                'verticalAlignment': 'MIDDLE'
+                            }
+                        },
+                        'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment)'
+                    }
+                })
+                # Compact fixed width for data columns (Period stays auto-sized)
+                period_idx = df.columns.get_loc('Period') if 'Period' in df.columns else 0
+                for col_idx in range(len(df.columns)):
+                    if col_idx == period_idx:
+                        continue
+                    requests.append({
+                        'updateDimensionProperties': {
+                            'range': {
+                                'sheetId': worksheet_id,
+                                'dimension': 'COLUMNS',
+                                'startIndex': col_idx,
+                                'endIndex': col_idx + 1
+                            },
+                            'properties': {'pixelSize': 95},
+                            'fields': 'pixelSize'
+                        }
+                    })
+
+            # For Invoice Mismatch Report, wrap every column that holds a long
+            # comma-separated invoice list so nothing stretches unreadably wide
+            if 'INVOICE MISMATCH' in title:
+                long_text_cols = [
+                    'Purchase Invoices', 'Inventory Invoices',
+                    'Missing in Inventory', 'Extra in Inventory'
+                ]
+                invoice_col_indices = [
+                    df.columns.get_loc(col)
+                    for col in long_text_cols
+                    if col in df.columns
+                ]
+                if invoice_col_indices:
+                    data_start_row = header_row_index + 1
+                    data_end_row = data_start_row + len(df)
+                    for col_idx in invoice_col_indices:
+                        # Override auto-resize with a sensible fixed width
+                        requests.append({
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': col_idx,
+                                    'endIndex': col_idx + 1
+                                },
+                                'properties': {'pixelSize': 280},
+                                'fields': 'pixelSize'
+                            }
+                        })
+                        # Wrap text and top-align in the invoice data cells
+                        requests.append({
+                            'repeatCell': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'startRowIndex': data_start_row,
+                                    'endRowIndex': data_end_row,
+                                    'startColumnIndex': col_idx,
+                                    'endColumnIndex': col_idx + 1
+                                },
+                                'cell': {
+                                    'userEnteredFormat': {
+                                        'wrapStrategy': 'WRAP',
+                                        'verticalAlignment': 'TOP'
+                                    }
+                                },
+                                'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment)'
+                            }
+                        })
+
             # Execute batch update
             if requests:
                 self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
@@ -1464,7 +1475,102 @@ class DiscrepancyAnalyzer:
                 
         except Exception as e:
             print(f"Error applying formatting: {e}")
-    
+
+    def _format_explainer_block(self, worksheet_id, requests, colors,
+                                header_row_idx, text_start_idx, text_end_idx,
+                                num_columns):
+        """Format an explainer section: merge each row across columns and wrap text.
+
+        Merging lets long sentences wrap naturally across the full sheet width
+        instead of overflowing into neighboring cells (which gets clipped once
+        adjacent cells have their own formatting).
+        """
+        # Unfreeze any frozen columns so we can merge explainer rows across the
+        # whole row (Google Sheets rejects merges that cross a freeze boundary).
+        requests.append({
+            'updateSheetProperties': {
+                'properties': {
+                    'sheetId': worksheet_id,
+                    'gridProperties': {'frozenColumnCount': 0}
+                },
+                'fields': 'gridProperties.frozenColumnCount'
+            }
+        })
+
+        # Unmerge first so re-runs don't collide with previously merged ranges
+        requests.append({
+            'unmergeCells': {
+                'range': {
+                    'sheetId': worksheet_id,
+                    'startRowIndex': header_row_idx,
+                    'endRowIndex': text_end_idx,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': num_columns
+                }
+            }
+        })
+
+        # Style the header row
+        requests.append({
+            'repeatCell': {
+                'range': {
+                    'sheetId': worksheet_id,
+                    'startRowIndex': header_row_idx,
+                    'endRowIndex': header_row_idx + 1,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': num_columns
+                },
+                'cell': {
+                    'userEnteredFormat': {
+                        'backgroundColor': colors['explainer_header'],
+                        'textFormat': {'fontSize': 11, 'bold': True},
+                        'horizontalAlignment': 'LEFT',
+                        'verticalAlignment': 'MIDDLE',
+                        'wrapStrategy': 'WRAP'
+                    }
+                },
+                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)'
+            }
+        })
+
+        # Style the text rows
+        requests.append({
+            'repeatCell': {
+                'range': {
+                    'sheetId': worksheet_id,
+                    'startRowIndex': text_start_idx,
+                    'endRowIndex': text_end_idx,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': num_columns
+                },
+                'cell': {
+                    'userEnteredFormat': {
+                        'backgroundColor': colors['explainer_text'],
+                        'textFormat': {'fontSize': 10, 'bold': False},
+                        'horizontalAlignment': 'LEFT',
+                        'verticalAlignment': 'MIDDLE',
+                        'wrapStrategy': 'WRAP'
+                    }
+                },
+                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)'
+            }
+        })
+
+        # Merge each explainer row across all columns so wrap uses the full width
+        for row_idx in range(header_row_idx, text_end_idx):
+            requests.append({
+                'mergeCells': {
+                    'range': {
+                        'sheetId': worksheet_id,
+                        'startRowIndex': row_idx,
+                        'endRowIndex': row_idx + 1,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': num_columns
+                    },
+                    'mergeType': 'MERGE_ALL'
+                }
+            })
+
     def _apply_monthly_summary_formatting(self, worksheet_id, df, requests):
         """Apply colorful formatting specific to monthly summary report"""
         try:
