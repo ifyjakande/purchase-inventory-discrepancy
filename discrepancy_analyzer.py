@@ -946,6 +946,7 @@ class DiscrepancyAnalyzer:
                                 'userEnteredFormat': {
                                     'backgroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
                                     'textFormat': {
+                                        'fontFamily': 'Lato',
                                         'fontSize': 10,
                                         'bold': False
                                     },
@@ -1466,6 +1467,10 @@ class DiscrepancyAnalyzer:
                             }
                         })
 
+            # Force Lato across every textFormat so per-section requests that
+            # replace the whole textFormat object don't drop the font.
+            self._inject_font_family(requests, 'Lato')
+
             # Execute batch update
             if requests:
                 self._api_call_with_retry(lambda: worksheet.spreadsheet.batch_update({
@@ -1475,6 +1480,24 @@ class DiscrepancyAnalyzer:
                 
         except Exception as e:
             print(f"Error applying formatting: {e}")
+
+    def _inject_font_family(self, node, font):
+        """Recursively set fontFamily on every textFormat dict in the requests.
+
+        The per-section formatting requests use field masks like
+        userEnteredFormat(...,textFormat,...) which replace the whole
+        textFormat object. Adding fontFamily here keeps Lato on every cell
+        across all output tabs.
+        """
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == 'textFormat' and isinstance(value, dict):
+                    value['fontFamily'] = font
+                else:
+                    self._inject_font_family(value, font)
+        elif isinstance(node, list):
+            for item in node:
+                self._inject_font_family(item, font)
 
     def _format_explainer_block(self, worksheet_id, requests, colors,
                                 header_row_idx, text_start_idx, text_end_idx,
