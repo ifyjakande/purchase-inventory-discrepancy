@@ -848,67 +848,57 @@ class DiscrepancyAnalyzer:
         else:
             return "Lower Volume"        # Bottom 25%
 
+    @staticmethod
+    def _parse_numeric(value_str):
+        """Parse a comma-formatted number string back to float, 0 on failure."""
+        try:
+            return float(str(value_str).replace(',', ''))
+        except (ValueError, AttributeError):
+            return 0
+
+    @staticmethod
+    def _format_weight(weight, use_tonnes=False):
+        """Format a kg weight. With use_tonnes=True, switch to tonnes above 1000kg."""
+        if use_tonnes and abs(weight) >= 1000:
+            tonnes_value = weight / 1000
+            unit = "tonne" if abs(tonnes_value) == 1.00 else "tonnes"
+            return f"{tonnes_value:,.2f} {unit}"
+        return f"{weight:,.2f} kg"
+
     def _calculate_performance_grand_total(self, performance_df):
         """Calculate grand total for performance report"""
-        # Convert numeric strings back to numbers for totaling
-        def parse_numeric(value_str):
-            try:
-                return float(str(value_str).replace(',', ''))
-            except (ValueError, AttributeError):
-                return 0
-
         # Calculate totals for the sum columns
-        total_birds = sum(parse_numeric(str(val)) for val in performance_df['Total Birds'])
-        total_combined = sum(parse_numeric(str(val)) for val in performance_df['Combined Total (kg)'])
-
-        # Helper function to format weight with appropriate unit
-        def format_weight(weight):
-            if abs(weight) >= 1000:
-                tonnes_value = weight / 1000
-                unit = "tonne" if abs(tonnes_value) == 1.00 else "tonnes"
-                return f"{tonnes_value:,.2f} {unit}"
-            else:
-                return f"{weight:,.2f} kg"
+        total_birds = sum(self._parse_numeric(val) for val in performance_df['Total Birds'])
+        total_combined = sum(self._parse_numeric(val) for val in performance_df['Combined Total (kg)'])
 
         # Build grand total in the same column order as the report rows
         grand = {
             'Purchase Officer': '═══════ GRAND TOTAL ═══════',
             'Average Birds per Day': '',
         }
-        for p in PRODUCTS:
+        for p in self.active_products:
             avg_col = f"Average {p['label']} Weight per Day (kg)"
             if avg_col in performance_df.columns:
                 grand[avg_col] = ''
         grand['Total Purchase Days'] = ''
         grand['Total Birds'] = f"{total_birds:,.0f}"
-        for p in PRODUCTS:
+        for p in self.active_products:
             tot_col = f"Total {p['label']} Weight (kg)"
             if tot_col in performance_df.columns:
-                total_w = sum(parse_numeric(str(val)) for val in performance_df[tot_col])
-                grand[tot_col] = format_weight(total_w)
-        grand['Combined Total (kg)'] = format_weight(total_combined)
+                total_w = sum(self._parse_numeric(val) for val in performance_df[tot_col])
+                grand[tot_col] = self._format_weight(total_w, use_tonnes=True)
+        grand['Combined Total (kg)'] = self._format_weight(total_combined, use_tonnes=True)
         grand['Volume Category'] = ''
         return grand
 
     def _calculate_monthly_grand_total(self, month_df, month):
         """Calculate grand total for a specific month"""
-        # Convert numeric strings back to numbers for totaling
-        def parse_numeric(value_str):
-            try:
-                return float(str(value_str).replace(',', ''))
-            except (ValueError, AttributeError):
-                return 0
-
         # Calculate totals for each category for this month
-        total_offtake = sum(int(parse_numeric(str(val))) for val in month_df['Offtake Count'])
-        total_p_birds = sum(parse_numeric(str(val)) for val in month_df['Purchase Birds Total'])
-        total_i_birds = sum(parse_numeric(str(val)) for val in month_df['Inventory Birds Total'])
+        total_offtake = sum(int(self._parse_numeric(val)) for val in month_df['Offtake Count'])
+        total_p_birds = sum(self._parse_numeric(val) for val in month_df['Purchase Birds Total'])
+        total_i_birds = sum(self._parse_numeric(val) for val in month_df['Inventory Birds Total'])
         total_birds_diff = total_i_birds - total_p_birds
         total_birds_pct = round((total_birds_diff / total_p_birds) * 100, 2) if total_p_birds > 0 else 0
-
-        # Helper function to format weight - always use kg (no tonnes conversion)
-        def format_weight(weight):
-            return f"{weight:,.2f} kg"
 
         grand = {
             'Month': '',
@@ -919,18 +909,19 @@ class DiscrepancyAnalyzer:
             'Birds Difference': f"{total_birds_diff:,.0f}",
             'Birds Percentage Difference': f"{total_birds_pct}%",
         }
-        # Per-product totals (only products with data, matching the officer rows)
+        # Per-product totals (only products with data, matching the officer rows).
+        # Monthly grand totals always use kg (no tonnes conversion).
         for p in self.active_products:
             label = p['label']
             p_col = f'Purchase {label} Weight Total'
             i_col = f'Inventory {label} Weight Total'
-            total_p = sum(parse_numeric(str(val)) for val in month_df[p_col]) if p_col in month_df.columns else 0
-            total_i = sum(parse_numeric(str(val)) for val in month_df[i_col]) if i_col in month_df.columns else 0
+            total_p = sum(self._parse_numeric(val) for val in month_df[p_col]) if p_col in month_df.columns else 0
+            total_i = sum(self._parse_numeric(val) for val in month_df[i_col]) if i_col in month_df.columns else 0
             diff = total_i - total_p
             pct = round((diff / total_p) * 100, 2) if total_p > 0 else 0
-            grand[p_col] = format_weight(total_p)
-            grand[i_col] = format_weight(total_i)
-            grand[f'{label} Weight Difference'] = format_weight(diff)
+            grand[p_col] = self._format_weight(total_p)
+            grand[i_col] = self._format_weight(total_i)
+            grand[f'{label} Weight Difference'] = self._format_weight(diff)
             grand[f'{label} Weight Percentage Difference'] = f"{pct}%"
         return grand
     
@@ -1083,8 +1074,9 @@ class DiscrepancyAnalyzer:
     def _preserve_existing_data(self, worksheet, new_df, sheet_type):
         """Preserve existing comments and resolution data with optimized API calls"""
         try:
-            # Skip preservation for monthly summary reports - they're pure calculations
-            if sheet_type in ('summary', 'target_tracker'):
+            # Skip preservation for pure-calculation reports (no manual comment/
+            # resolution columns to keep): monthly summary, target tracker, performance
+            if sheet_type in ('summary', 'target_tracker', 'performance'):
                 return new_df
             
             # Read existing data using get_all_values with delay
@@ -1106,17 +1098,10 @@ class DiscrepancyAnalyzer:
             
             # Create lookup for existing data
             for idx, new_row in new_df.iterrows():
-                # Create unique key for matching based on available columns
+                # Match on Date + Purchase Officer (Weight/Invoice discrepancy reports)
                 if 'Date' in existing_df.columns and 'Date' in new_df.columns:
-                    # For discrepancy reports (Weight/Invoice)
                     key_match = existing_df[
-                        (existing_df['Date'] == new_row['Date']) & 
-                        (existing_df['Purchase Officer'] == new_row['Purchase Officer'])
-                    ]
-                elif 'Month' in existing_df.columns and 'Month' in new_df.columns:
-                    # For monthly summary reports
-                    key_match = existing_df[
-                        (existing_df['Month'] == new_row['Month']) & 
+                        (existing_df['Date'] == new_row['Date']) &
                         (existing_df['Purchase Officer'] == new_row['Purchase Officer'])
                     ]
                 else:
@@ -1497,6 +1482,42 @@ class DiscrepancyAnalyzer:
                                 },
                                 'properties': {'pixelSize': 165},
                                 'fields': 'pixelSize'
+                            }
+                        })
+
+                # The free-text comment columns hold long sentences - cap their width
+                # and wrap the text so a single long comment doesn't stretch the column
+                comment_cols = ['Purchase Team Comments', 'Inventory Team Comments']
+                data_start_row = header_row_index + 1
+                data_end_row = data_start_row + len(df)
+                for col_name in comment_cols:
+                    if col_name in df.columns:
+                        ci = df.columns.get_loc(col_name)
+                        requests.append({
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': ci,
+                                    'endIndex': ci + 1
+                                },
+                                'properties': {'pixelSize': 300},
+                                'fields': 'pixelSize'
+                            }
+                        })
+                        requests.append({
+                            'repeatCell': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'startRowIndex': data_start_row,
+                                    'endRowIndex': data_end_row,
+                                    'startColumnIndex': ci,
+                                    'endColumnIndex': ci + 1
+                                },
+                                'cell': {
+                                    'userEnteredFormat': {'wrapStrategy': 'WRAP', 'verticalAlignment': 'TOP'}
+                                },
+                                'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment)'
                             }
                         })
 
@@ -1988,8 +2009,7 @@ class DiscrepancyAnalyzer:
                 'metrics': {'red': 0.95, 'green': 0.95, 'blue': 0.85},          # Light cream
                 'working_days': {'red': 0.88, 'green': 0.92, 'blue': 0.88},     # Soft green
                 'total_birds': {'red': 1.0, 'green': 0.90, 'blue': 0.85},       # Light coral/salmon
-                'total_chicken': {'red': 0.89, 'green': 0.95, 'blue': 0.99},    # Light sky blue
-                'total_gizzard': {'red': 0.91, 'green': 0.96, 'blue': 0.91},    # Light mint green
+                'total_chicken': {'red': 0.89, 'green': 0.95, 'blue': 0.99},    # Light sky blue (all per-product totals)
                 'combined_total': {'red': 0.95, 'green': 0.90, 'blue': 0.96}    # Light lavender/purple
             }
 
