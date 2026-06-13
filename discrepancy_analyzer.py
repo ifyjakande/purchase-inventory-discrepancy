@@ -22,11 +22,39 @@ def load_env_file():
                     if key not in os.environ:
                         os.environ[key] = value
 
+# Products tracked across the purchase and inventory sheets, in display order.
+# 'label' drives the report column names (e.g. "Purchase Chicken Weight"),
+# so chicken/gizzard keep their exact existing column names.
+# To add a product later, just add an entry here - all reports pick it up.
+PRODUCTS = [
+    {'label': 'Chicken',    'purchase_col': 'PURCHASED CHICKEN WEIGHT',     'inventory_col': 'INVENTORY CHICKEN WEIGHT'},
+    {'label': 'Gizzard',    'purchase_col': 'PURCHASED GIZZARD WEIGHT',     'inventory_col': 'INVENTORY GIZZARD WEIGHT'},
+    {'label': 'Head',       'purchase_col': 'PURCHASED HEAD WEIGHT',        'inventory_col': 'INVENTORY HEAD WEIGHT'},
+    {'label': 'Leg',        'purchase_col': 'PURCHASED LEG WEIGHT',         'inventory_col': 'INVENTORY LEG WEIGHT'},
+    {'label': 'Head & Leg', 'purchase_col': 'PURCHASED HEAD & LEG WEIGHT',  'inventory_col': 'INVENTORY HEAD & LEG WEIGHT'},
+    {'label': 'Liver',      'purchase_col': 'PURCHASED LIVER WEIGHT',       'inventory_col': 'INVENTORY LIVER WEIGHT'},
+    {'label': 'Neck',       'purchase_col': 'PURCHASED NECK WEIGHT',        'inventory_col': 'INVENTORY NECK WEIGHT'},
+]
+
 class DiscrepancyAnalyzer:
     def __init__(self, service_account_json=None):
         """Initialize with service account credentials"""
         self.gc = self._authenticate(service_account_json)
         self.purchase_targets_2026 = self._load_purchase_targets()
+        # Products shown in the reports. Defaults to all; run_analysis narrows this
+        # to only the products that actually have data so empty columns don't clutter.
+        self.active_products = list(PRODUCTS)
+
+    def _compute_active_products(self, purchase_df, inventory_df):
+        """Return only the products that have any data on either sheet, so the
+        reports don't show empty columns for products no one has recorded yet."""
+        active = []
+        for p in PRODUCTS:
+            p_sum = float(purchase_df[p['purchase_col']].abs().sum()) if p['purchase_col'] in purchase_df.columns else 0
+            i_sum = float(inventory_df[p['inventory_col']].abs().sum()) if p['inventory_col'] in inventory_df.columns else 0
+            if p_sum > 0 or i_sum > 0:
+                active.append(p)
+        return active
 
     def _get_wat_timestamp(self):
         """Get current timestamp in West Africa Time with AM/PM format"""
@@ -174,8 +202,9 @@ class DiscrepancyAnalyzer:
                 df = df.dropna(how='all')
                 
                 # Convert numeric columns to numeric values
-                numeric_columns = ['NUMBER OF BIRDS', 'PURCHASED CHICKEN WEIGHT', 'PURCHASED GIZZARD WEIGHT', 
-                                 'INVENTORY CHICKEN WEIGHT', 'INVENTORY GIZZARD WEIGHT']
+                numeric_columns = (['NUMBER OF BIRDS']
+                                   + [p['purchase_col'] for p in PRODUCTS]
+                                   + [p['inventory_col'] for p in PRODUCTS])
                 for col in numeric_columns:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -199,13 +228,13 @@ class DiscrepancyAnalyzer:
         purchase_df['PURCHASE OFFICER NAME'] = purchase_df['PURCHASE OFFICER NAME'].str.strip()
         
         # Group by date and purchase officer, sum the metrics
-        grouped = purchase_df.groupby(['DATE', 'PURCHASE OFFICER NAME']).agg({
-            'NUMBER OF BIRDS': 'sum',
-            'PURCHASED CHICKEN WEIGHT': 'sum',
-            'PURCHASED GIZZARD WEIGHT': 'sum',
-            'INVOICE NUMBER': lambda x: list(x)  # Collect all invoice numbers
-        }).reset_index()
-        
+        agg_spec = {'NUMBER OF BIRDS': 'sum'}
+        for p in PRODUCTS:
+            if p['purchase_col'] in purchase_df.columns:
+                agg_spec[p['purchase_col']] = 'sum'
+        agg_spec['INVOICE NUMBER'] = lambda x: list(x)  # Collect all invoice numbers
+        grouped = purchase_df.groupby(['DATE', 'PURCHASE OFFICER NAME']).agg(agg_spec).reset_index()
+
         return grouped
     
     def process_inventory_data(self, inventory_df):
@@ -229,12 +258,12 @@ class DiscrepancyAnalyzer:
         inventory_df['INVOICE_LIST'] = inventory_df['INVOICE NUMBER'].apply(split_invoices)
         
         # Group by date and purchase officer, sum the metrics and collect invoice numbers
-        grouped = inventory_df.groupby(['DATE', 'PURCHASE OFFICER NAME']).agg({
-            'NUMBER OF BIRDS': 'sum',
-            'INVENTORY CHICKEN WEIGHT': 'sum',
-            'INVENTORY GIZZARD WEIGHT': 'sum',
-            'INVOICE_LIST': lambda x: [item for sublist in x for item in sublist]  # Flatten all invoice lists
-        }).reset_index()
+        agg_spec = {'NUMBER OF BIRDS': 'sum'}
+        for p in PRODUCTS:
+            if p['inventory_col'] in inventory_df.columns:
+                agg_spec[p['inventory_col']] = 'sum'
+        agg_spec['INVOICE_LIST'] = lambda x: [item for sublist in x for item in sublist]  # Flatten all invoice lists
+        grouped = inventory_df.groupby(['DATE', 'PURCHASE OFFICER NAME']).agg(agg_spec).reset_index()
         
         # Reconstruct the INVOICE NUMBER column from the flattened list
         grouped['INVOICE NUMBER'] = grouped['INVOICE_LIST'].apply(lambda x: ','.join(sorted(set(x))))
@@ -261,39 +290,41 @@ class DiscrepancyAnalyzer:
             
             if not inventory_match.empty:
                 inv_row = inventory_match.iloc[0]
-                
-                # Calculate discrepancies (round to 2 decimal places)
+
+                # Bird discrepancy (round to 2 decimal places)
                 bird_diff = round(inv_row['NUMBER OF BIRDS'] - purchase_row['NUMBER OF BIRDS'], 2)
-                chicken_diff = round(inv_row['INVENTORY CHICKEN WEIGHT'] - purchase_row['PURCHASED CHICKEN WEIGHT'], 2)
-                gizzard_diff = round(inv_row['INVENTORY GIZZARD WEIGHT'] - purchase_row['PURCHASED GIZZARD WEIGHT'], 2)
-                
-                # Calculate percentage differences using purchase as baseline
                 bird_pct_diff = round((bird_diff / purchase_row['NUMBER OF BIRDS']) * 100, 2) if purchase_row['NUMBER OF BIRDS'] > 0 else 0
-                chicken_pct_diff = round((chicken_diff / purchase_row['PURCHASED CHICKEN WEIGHT']) * 100, 2) if purchase_row['PURCHASED CHICKEN WEIGHT'] > 0 else 0
-                gizzard_pct_diff = round((gizzard_diff / purchase_row['PURCHASED GIZZARD WEIGHT']) * 100, 2) if purchase_row['PURCHASED GIZZARD WEIGHT'] > 0 else 0
-                
-                # Check if there's a discrepancy (use tolerance for floating point comparison)
+
+                # Per-product weight discrepancies (purchase as baseline)
                 tolerance = 0.01  # 0.01 tolerance for floating point precision
-                has_discrepancy = (abs(bird_diff) > tolerance or abs(chicken_diff) > tolerance or abs(gizzard_diff) > tolerance)
-                
+                has_discrepancy = abs(bird_diff) > tolerance
+                weight_cells = {}
+                pct_cells = {}
+                for p in self.active_products:
+                    label = p['label']
+                    pw = purchase_row.get(p['purchase_col'], 0) or 0
+                    iw = inv_row.get(p['inventory_col'], 0) or 0
+                    diff = round(iw - pw, 2)
+                    pct = round((diff / pw) * 100, 2) if pw > 0 else 0
+                    if abs(diff) > tolerance:
+                        has_discrepancy = True
+                    weight_cells[f'Purchase {label} Weight'] = f"{round(pw, 2):,}"
+                    weight_cells[f'Inventory {label} Weight'] = f"{round(iw, 2):,}"
+                    weight_cells[f'{label} Weight Difference'] = f"{diff:,}"
+                    pct_cells[f'{label} Weight Percentage Difference'] = f"{pct}%"
+
                 discrepancies.append({
                     'Date': date.strftime('%d-%b-%Y'),
                     'Purchase Officer': officer,
                     'Purchase Birds': f"{round(purchase_row['NUMBER OF BIRDS']):,.0f}",
                     'Inventory Birds': f"{round(inv_row['NUMBER OF BIRDS']):,.0f}",
                     'Birds Difference': f"{bird_diff:,.0f}",
-                    'Purchase Chicken Weight': f"{round(purchase_row['PURCHASED CHICKEN WEIGHT'], 2):,}",
-                    'Inventory Chicken Weight': f"{round(inv_row['INVENTORY CHICKEN WEIGHT'], 2):,}",
-                    'Chicken Weight Difference': f"{chicken_diff:,}",
-                    'Purchase Gizzard Weight': f"{round(purchase_row['PURCHASED GIZZARD WEIGHT'], 2):,}",
-                    'Inventory Gizzard Weight': f"{round(inv_row['INVENTORY GIZZARD WEIGHT'], 2):,}",
-                    'Gizzard Weight Difference': f"{gizzard_diff:,}",
+                    **weight_cells,
                     'Birds Percentage Difference': f"{bird_pct_diff}%",
-                    'Chicken Weight Percentage Difference': f"{chicken_pct_diff}%",
-                    'Gizzard Weight Percentage Difference': f"{gizzard_pct_diff}%",
+                    **pct_cells,
                     'Status': 'Discrepancy' if has_discrepancy else 'Match',
-                    'Responsible Party': '' if has_discrepancy else '',
-                    'Root Cause': '' if has_discrepancy else '',
+                    'Responsible Party': '',
+                    'Root Cause': '',
                     'Purchase Team Comments': '',
                     'Inventory Team Comments': '',
                     'Resolution Status': 'PENDING' if has_discrepancy else 'RESOLVED',
@@ -301,21 +332,24 @@ class DiscrepancyAnalyzer:
                 })
             else:
                 # No inventory record found - purchase exists but not in inventory
+                weight_cells = {}
+                pct_cells = {}
+                for p in self.active_products:
+                    label = p['label']
+                    pw = purchase_row.get(p['purchase_col'], 0) or 0
+                    weight_cells[f'Purchase {label} Weight'] = f"{round(pw, 2):,}"
+                    weight_cells[f'Inventory {label} Weight'] = 'NOT FOUND'
+                    weight_cells[f'{label} Weight Difference'] = 'N/A'
+                    pct_cells[f'{label} Weight Percentage Difference'] = 'N/A'
                 discrepancies.append({
                     'Date': date.strftime('%d-%b-%Y'),
                     'Purchase Officer': officer,
                     'Purchase Birds': f"{round(purchase_row['NUMBER OF BIRDS']):,.0f}",
                     'Inventory Birds': 'NOT FOUND',
                     'Birds Difference': 'N/A',
-                    'Purchase Chicken Weight': f"{round(purchase_row['PURCHASED CHICKEN WEIGHT'], 2):,}",
-                    'Inventory Chicken Weight': 'NOT FOUND',
-                    'Chicken Weight Difference': 'N/A',
-                    'Purchase Gizzard Weight': f"{round(purchase_row['PURCHASED GIZZARD WEIGHT'], 2):,}",
-                    'Inventory Gizzard Weight': 'NOT FOUND',
-                    'Gizzard Weight Difference': 'N/A',
+                    **weight_cells,
                     'Birds Percentage Difference': 'N/A',
-                    'Chicken Weight Percentage Difference': 'N/A',
-                    'Gizzard Weight Percentage Difference': 'N/A',
+                    **pct_cells,
                     'Status': 'MISSING IN INVENTORY',
                     'Responsible Party': '',
                     'Root Cause': '',
@@ -333,21 +367,24 @@ class DiscrepancyAnalyzer:
             
             if combination not in processed_combinations:
                 # Inventory record exists but not in purchase
+                weight_cells = {}
+                pct_cells = {}
+                for p in self.active_products:
+                    label = p['label']
+                    iw = inv_row.get(p['inventory_col'], 0) or 0
+                    weight_cells[f'Purchase {label} Weight'] = 'NOT FOUND'
+                    weight_cells[f'Inventory {label} Weight'] = f"{round(iw, 2):,}"
+                    weight_cells[f'{label} Weight Difference'] = 'N/A'
+                    pct_cells[f'{label} Weight Percentage Difference'] = 'N/A'
                 discrepancies.append({
                     'Date': date.strftime('%d-%b-%Y'),
                     'Purchase Officer': officer,
                     'Purchase Birds': 'NOT FOUND',
                     'Inventory Birds': f"{round(inv_row['NUMBER OF BIRDS']):,.0f}",
                     'Birds Difference': 'N/A',
-                    'Purchase Chicken Weight': 'NOT FOUND',
-                    'Inventory Chicken Weight': f"{round(inv_row['INVENTORY CHICKEN WEIGHT'], 2):,}",
-                    'Chicken Weight Difference': 'N/A',
-                    'Purchase Gizzard Weight': 'NOT FOUND',
-                    'Inventory Gizzard Weight': f"{round(inv_row['INVENTORY GIZZARD WEIGHT'], 2):,}",
-                    'Gizzard Weight Difference': 'N/A',
+                    **weight_cells,
                     'Birds Percentage Difference': 'N/A',
-                    'Chicken Weight Percentage Difference': 'N/A',
-                    'Gizzard Weight Percentage Difference': 'N/A',
+                    **pct_cells,
                     'Status': 'MISSING IN PURCHASE',
                     'Responsible Party': '',
                     'Root Cause': '',
@@ -485,25 +522,26 @@ class DiscrepancyAnalyzer:
         # Process purchase data by month and officer
         if not purchase_grouped.empty:
             purchase_grouped['YEAR_MONTH'] = purchase_grouped['DATE'].dt.to_period('M')
-            purchase_monthly = purchase_grouped.groupby(['YEAR_MONTH', 'PURCHASE OFFICER NAME']).agg({
-                'NUMBER OF BIRDS': ['sum', 'count'],  # count gives us offtake count
-                'PURCHASED CHICKEN WEIGHT': 'sum',
-                'PURCHASED GIZZARD WEIGHT': 'sum'
-            }).reset_index()
-            # Flatten column names after multi-level aggregation
-            purchase_monthly.columns = ['YEAR_MONTH', 'PURCHASE OFFICER NAME', 'NUMBER OF BIRDS',
-                                       'OFFTAKE_COUNT', 'PURCHASED CHICKEN WEIGHT', 'PURCHASED GIZZARD WEIGHT']
+            # Named aggregation keeps columns flat (no multi-level index to flatten)
+            agg_named = {
+                'NUMBER OF BIRDS': ('NUMBER OF BIRDS', 'sum'),
+                'OFFTAKE_COUNT': ('NUMBER OF BIRDS', 'count'),  # count gives us offtake count
+            }
+            for p in PRODUCTS:
+                if p['purchase_col'] in purchase_grouped.columns:
+                    agg_named[p['purchase_col']] = (p['purchase_col'], 'sum')
+            purchase_monthly = purchase_grouped.groupby(['YEAR_MONTH', 'PURCHASE OFFICER NAME']).agg(**agg_named).reset_index()
         else:
             purchase_monthly = pd.DataFrame()
         
         # Process inventory data by month and officer
         if not inventory_df.empty:
             inventory_df['YEAR_MONTH'] = inventory_df['DATE'].dt.to_period('M')
-            inventory_monthly = inventory_df.groupby(['YEAR_MONTH', 'PURCHASE OFFICER NAME']).agg({
-                'NUMBER OF BIRDS': 'sum',
-                'INVENTORY CHICKEN WEIGHT': 'sum',
-                'INVENTORY GIZZARD WEIGHT': 'sum'
-            }).reset_index()
+            agg_named = {'NUMBER OF BIRDS': ('NUMBER OF BIRDS', 'sum')}
+            for p in PRODUCTS:
+                if p['inventory_col'] in inventory_df.columns:
+                    agg_named[p['inventory_col']] = (p['inventory_col'], 'sum')
+            inventory_monthly = inventory_df.groupby(['YEAR_MONTH', 'PURCHASE OFFICER NAME']).agg(**agg_named).reset_index()
         else:
             inventory_monthly = pd.DataFrame()
         
@@ -530,38 +568,28 @@ class DiscrepancyAnalyzer:
                 (inventory_monthly['PURCHASE OFFICER NAME'] == officer)
             ]
             
-            # Extract values or set to 0 if not found
+            # Extract bird values or set to 0 if not found
             if not purchase_match.empty:
                 p_birds = round(purchase_match.iloc[0]['NUMBER OF BIRDS'], 2)
-                p_chicken = round(purchase_match.iloc[0]['PURCHASED CHICKEN WEIGHT'], 2)
-                p_gizzard = round(purchase_match.iloc[0]['PURCHASED GIZZARD WEIGHT'], 2)
                 offtake_count = int(purchase_match.iloc[0]['OFFTAKE_COUNT'])
+                p_row = purchase_match.iloc[0]
             else:
                 p_birds = 0
-                p_chicken = 0
-                p_gizzard = 0
                 offtake_count = 0
-            
+                p_row = None
+
             if not inventory_match.empty:
                 i_birds = round(inventory_match.iloc[0]['NUMBER OF BIRDS'], 2)
-                i_chicken = round(inventory_match.iloc[0]['INVENTORY CHICKEN WEIGHT'], 2)
-                i_gizzard = round(inventory_match.iloc[0]['INVENTORY GIZZARD WEIGHT'], 2)
+                i_row = inventory_match.iloc[0]
             else:
                 i_birds = 0
-                i_chicken = 0
-                i_gizzard = 0
-            
-            # Calculate differences
+                i_row = None
+
+            # Bird differences
             birds_diff = round(i_birds - p_birds, 2)
-            chicken_diff = round(i_chicken - p_chicken, 2)
-            gizzard_diff = round(i_gizzard - p_gizzard, 2)
-            
-            # Calculate percentage differences
             birds_pct = round((birds_diff / p_birds) * 100, 2) if p_birds > 0 else 0
-            chicken_pct = round((chicken_diff / p_chicken) * 100, 2) if p_chicken > 0 else 0
-            gizzard_pct = round((gizzard_diff / p_gizzard) * 100, 2) if p_gizzard > 0 else 0
-            
-            summaries.append({
+
+            summary = {
                 'Month': str(year_month),
                 'Purchase Officer': officer,
                 'Offtake Count': f"{offtake_count:,}",
@@ -569,15 +597,19 @@ class DiscrepancyAnalyzer:
                 'Inventory Birds Total': f"{i_birds:,.0f}",
                 'Birds Difference': f"{birds_diff:,.0f}",
                 'Birds Percentage Difference': f"{birds_pct}%",
-                'Purchase Chicken Weight Total': f"{p_chicken:,.2f}",
-                'Inventory Chicken Weight Total': f"{i_chicken:,.2f}",
-                'Chicken Weight Difference': f"{chicken_diff:,.2f}",
-                'Chicken Weight Percentage Difference': f"{chicken_pct}%",
-                'Purchase Gizzard Weight Total': f"{p_gizzard:,.2f}",
-                'Inventory Gizzard Weight Total': f"{i_gizzard:,.2f}",
-                'Gizzard Weight Difference': f"{gizzard_diff:,.2f}",
-                'Gizzard Weight Percentage Difference': f"{gizzard_pct}%"
-            })
+            }
+            # Per-product weight totals, differences and percentages
+            for p in self.active_products:
+                label = p['label']
+                pw = round(p_row.get(p['purchase_col'], 0), 2) if p_row is not None else 0
+                iw = round(i_row.get(p['inventory_col'], 0), 2) if i_row is not None else 0
+                diff = round(iw - pw, 2)
+                pct = round((diff / pw) * 100, 2) if pw > 0 else 0
+                summary[f'Purchase {label} Weight Total'] = f"{pw:,.2f}"
+                summary[f'Inventory {label} Weight Total'] = f"{iw:,.2f}"
+                summary[f'{label} Weight Difference'] = f"{diff:,.2f}"
+                summary[f'{label} Weight Percentage Difference'] = f"{pct}%"
+            summaries.append(summary)
         
         # Group summaries by month and add grand totals per month
         summary_df = pd.DataFrame(summaries)
@@ -739,59 +771,59 @@ class DiscrepancyAnalyzer:
         if purchase_grouped.empty:
             return pd.DataFrame()
 
-        # Calculate averages and sums per purchase officer
-        performance_stats = purchase_grouped.groupby('PURCHASE OFFICER NAME').agg({
-            'NUMBER OF BIRDS': ['mean', 'count', 'sum'],
-            'PURCHASED CHICKEN WEIGHT': ['mean', 'sum'],
-            'PURCHASED GIZZARD WEIGHT': ['mean', 'sum']
-        }).reset_index()
+        # Products with data that also have a column present
+        present_products = [p for p in self.active_products if p['purchase_col'] in purchase_grouped.columns]
 
-        # Flatten column names
-        performance_stats.columns = [
-            'Purchase Officer',
-            'Average Birds per Day',
-            'Total Purchase Days',
-            'Total Birds',
-            'Average Chicken Weight per Day',
-            'Total Chicken Weight',
-            'Average Gizzard Weight per Day',
-            'Total Gizzard Weight'
-        ]
+        # Calculate averages and sums per purchase officer (named agg keeps columns flat)
+        agg_named = {
+            'Average Birds per Day': ('NUMBER OF BIRDS', 'mean'),
+            'Total Purchase Days': ('NUMBER OF BIRDS', 'count'),
+            'Total Birds': ('NUMBER OF BIRDS', 'sum'),
+        }
+        for p in present_products:
+            agg_named[f"Average {p['label']} Weight per Day"] = (p['purchase_col'], 'mean')
+            agg_named[f"Total {p['label']} Weight"] = (p['purchase_col'], 'sum')
+        performance_stats = (purchase_grouped.groupby('PURCHASE OFFICER NAME')
+                             .agg(**agg_named).reset_index()
+                             .rename(columns={'PURCHASE OFFICER NAME': 'Purchase Officer'}))
 
         # Round to appropriate decimal places
         performance_stats['Average Birds per Day'] = performance_stats['Average Birds per Day'].round(0)
         performance_stats['Total Birds'] = performance_stats['Total Birds'].round(0)
-        performance_stats['Average Chicken Weight per Day'] = performance_stats['Average Chicken Weight per Day'].round(2)
-        performance_stats['Total Chicken Weight'] = performance_stats['Total Chicken Weight'].round(2)
-        performance_stats['Average Gizzard Weight per Day'] = performance_stats['Average Gizzard Weight per Day'].round(2)
-        performance_stats['Total Gizzard Weight'] = performance_stats['Total Gizzard Weight'].round(2)
+        for p in present_products:
+            performance_stats[f"Average {p['label']} Weight per Day"] = performance_stats[f"Average {p['label']} Weight per Day"].round(2)
+            performance_stats[f"Total {p['label']} Weight"] = performance_stats[f"Total {p['label']} Weight"].round(2)
 
-        # Calculate combined total (chicken + gizzard)
-        performance_stats['Combined Total'] = (performance_stats['Total Chicken Weight'] +
-                                               performance_stats['Total Gizzard Weight']).round(2)
+        # Calculate combined total across all products
+        total_cols = [f"Total {p['label']} Weight" for p in present_products]
+        performance_stats['Combined Total'] = (performance_stats[total_cols].sum(axis=1).round(2)
+                                               if total_cols else 0.0)
 
         # Calculate data-driven performance thresholds based on Combined Total weight
         q75 = float(performance_stats['Combined Total'].quantile(0.75))
         q50 = float(performance_stats['Combined Total'].quantile(0.50))
         q25 = float(performance_stats['Combined Total'].quantile(0.25))
 
-        # Format for display
+        # Format for display - averages first (birds then products), then totals, then combined
         performance_report = []
         for _, row in performance_stats.iterrows():
-            performance_report.append({
+            entry = {
                 'Purchase Officer': row['Purchase Officer'],
                 'Average Birds per Day': f"{row['Average Birds per Day']:,.0f}",
-                'Average Chicken Weight per Day (kg)': f"{row['Average Chicken Weight per Day']:,.2f}",
-                'Average Gizzard Weight per Day (kg)': f"{row['Average Gizzard Weight per Day']:,.2f}",
-                'Total Purchase Days': f"{int(row['Total Purchase Days']):,}",
-                'Total Birds': f"{row['Total Birds']:,.0f}",
-                'Total Chicken Weight (kg)': f"{row['Total Chicken Weight']:,.2f}",
-                'Total Gizzard Weight (kg)': f"{row['Total Gizzard Weight']:,.2f}",
-                'Combined Total (kg)': f"{row['Combined Total']:,.2f}",
-                'Volume Category': self._calculate_data_driven_performance_rating(
-                    row['Combined Total'], q75, q50, q25
-                )
-            })
+            }
+            for p in present_products:
+                avg_col = f"Average {p['label']} Weight per Day"
+                entry[f"{avg_col} (kg)"] = f"{row[avg_col]:,.2f}"
+            entry['Total Purchase Days'] = f"{int(row['Total Purchase Days']):,}"
+            entry['Total Birds'] = f"{row['Total Birds']:,.0f}"
+            for p in present_products:
+                tot_col = f"Total {p['label']} Weight"
+                entry[f"{tot_col} (kg)"] = f"{row[tot_col]:,.2f}"
+            entry['Combined Total (kg)'] = f"{row['Combined Total']:,.2f}"
+            entry['Volume Category'] = self._calculate_data_driven_performance_rating(
+                row['Combined Total'], q75, q50, q25
+            )
+            performance_report.append(entry)
 
         # Sort by combined total weight (descending)
         performance_df = pd.DataFrame(performance_report)
@@ -825,10 +857,8 @@ class DiscrepancyAnalyzer:
             except (ValueError, AttributeError):
                 return 0
 
-        # Calculate totals for the new sum columns
+        # Calculate totals for the sum columns
         total_birds = sum(parse_numeric(str(val)) for val in performance_df['Total Birds'])
-        total_chicken_weight = sum(parse_numeric(str(val)) for val in performance_df['Total Chicken Weight (kg)'])
-        total_gizzard_weight = sum(parse_numeric(str(val)) for val in performance_df['Total Gizzard Weight (kg)'])
         total_combined = sum(parse_numeric(str(val)) for val in performance_df['Combined Total (kg)'])
 
         # Helper function to format weight with appropriate unit
@@ -840,18 +870,25 @@ class DiscrepancyAnalyzer:
             else:
                 return f"{weight:,.2f} kg"
 
-        return {
+        # Build grand total in the same column order as the report rows
+        grand = {
             'Purchase Officer': '═══════ GRAND TOTAL ═══════',
             'Average Birds per Day': '',
-            'Average Chicken Weight per Day (kg)': '',
-            'Average Gizzard Weight per Day (kg)': '',
-            'Total Purchase Days': '',
-            'Total Birds': f"{total_birds:,.0f}",
-            'Total Chicken Weight (kg)': format_weight(total_chicken_weight),
-            'Total Gizzard Weight (kg)': format_weight(total_gizzard_weight),
-            'Combined Total (kg)': format_weight(total_combined),
-            'Volume Category': ''
         }
+        for p in PRODUCTS:
+            avg_col = f"Average {p['label']} Weight per Day (kg)"
+            if avg_col in performance_df.columns:
+                grand[avg_col] = ''
+        grand['Total Purchase Days'] = ''
+        grand['Total Birds'] = f"{total_birds:,.0f}"
+        for p in PRODUCTS:
+            tot_col = f"Total {p['label']} Weight (kg)"
+            if tot_col in performance_df.columns:
+                total_w = sum(parse_numeric(str(val)) for val in performance_df[tot_col])
+                grand[tot_col] = format_weight(total_w)
+        grand['Combined Total (kg)'] = format_weight(total_combined)
+        grand['Volume Category'] = ''
+        return grand
 
     def _calculate_monthly_grand_total(self, month_df, month):
         """Calculate grand total for a specific month"""
@@ -866,26 +903,14 @@ class DiscrepancyAnalyzer:
         total_offtake = sum(int(parse_numeric(str(val))) for val in month_df['Offtake Count'])
         total_p_birds = sum(parse_numeric(str(val)) for val in month_df['Purchase Birds Total'])
         total_i_birds = sum(parse_numeric(str(val)) for val in month_df['Inventory Birds Total'])
-        total_p_chicken = sum(parse_numeric(str(val)) for val in month_df['Purchase Chicken Weight Total'])
-        total_i_chicken = sum(parse_numeric(str(val)) for val in month_df['Inventory Chicken Weight Total'])
-        total_p_gizzard = sum(parse_numeric(str(val)) for val in month_df['Purchase Gizzard Weight Total'])
-        total_i_gizzard = sum(parse_numeric(str(val)) for val in month_df['Inventory Gizzard Weight Total'])
-
-        # Calculate total differences
         total_birds_diff = total_i_birds - total_p_birds
-        total_chicken_diff = total_i_chicken - total_p_chicken
-        total_gizzard_diff = total_i_gizzard - total_p_gizzard
-
-        # Calculate total percentage differences
         total_birds_pct = round((total_birds_diff / total_p_birds) * 100, 2) if total_p_birds > 0 else 0
-        total_chicken_pct = round((total_chicken_diff / total_p_chicken) * 100, 2) if total_p_chicken > 0 else 0
-        total_gizzard_pct = round((total_gizzard_diff / total_p_gizzard) * 100, 2) if total_p_gizzard > 0 else 0
 
         # Helper function to format weight - always use kg (no tonnes conversion)
         def format_weight(weight):
             return f"{weight:,.2f} kg"
-        
-        return {
+
+        grand = {
             'Month': '',
             'Purchase Officer': f'═══════ {month} GRAND TOTAL ═══════',
             'Offtake Count': f"{total_offtake:,}",
@@ -893,15 +918,21 @@ class DiscrepancyAnalyzer:
             'Inventory Birds Total': f"{total_i_birds:,.0f}",
             'Birds Difference': f"{total_birds_diff:,.0f}",
             'Birds Percentage Difference': f"{total_birds_pct}%",
-            'Purchase Chicken Weight Total': format_weight(total_p_chicken),
-            'Inventory Chicken Weight Total': format_weight(total_i_chicken),
-            'Chicken Weight Difference': format_weight(total_chicken_diff),
-            'Chicken Weight Percentage Difference': f"{total_chicken_pct}%",
-            'Purchase Gizzard Weight Total': format_weight(total_p_gizzard),
-            'Inventory Gizzard Weight Total': format_weight(total_i_gizzard),
-            'Gizzard Weight Difference': format_weight(total_gizzard_diff),
-            'Gizzard Weight Percentage Difference': f"{total_gizzard_pct}%"
         }
+        # Per-product totals (only products with data, matching the officer rows)
+        for p in self.active_products:
+            label = p['label']
+            p_col = f'Purchase {label} Weight Total'
+            i_col = f'Inventory {label} Weight Total'
+            total_p = sum(parse_numeric(str(val)) for val in month_df[p_col]) if p_col in month_df.columns else 0
+            total_i = sum(parse_numeric(str(val)) for val in month_df[i_col]) if i_col in month_df.columns else 0
+            diff = total_i - total_p
+            pct = round((diff / total_p) * 100, 2) if total_p > 0 else 0
+            grand[p_col] = format_weight(total_p)
+            grand[i_col] = format_weight(total_i)
+            grand[f'{label} Weight Difference'] = format_weight(diff)
+            grand[f'{label} Weight Percentage Difference'] = f"{pct}%"
+        return grand
     
     def update_google_sheet_with_preservation(self, sheet_id, sheet_name, df, title, sheet_type):
         """Update Google Sheet with data preservation and optimized error handling"""
@@ -981,7 +1012,7 @@ class DiscrepancyAnalyzer:
             elif sheet_type == 'performance':
                 data_to_write.append([])  # Empty row
                 data_to_write.append(['HOW VOLUME CATEGORIES WORK:'])
-                data_to_write.append(['We rank purchase officers based on their Combined Total weight (chicken + gizzard added together).'])
+                data_to_write.append(['We rank purchase officers based on their Combined Total weight (all product weights added together).'])
                 data_to_write.append(['Then we divide them into 4 groups:'])
                 data_to_write.append(['Highest Volume = Top 25% (the officers who handled the most weight)'])
                 data_to_write.append(['High Volume = Next 25% (above average, but not the highest)'])
@@ -1011,7 +1042,20 @@ class DiscrepancyAnalyzer:
             if len(data_to_write) > 1000:
                 # For very large datasets, consider chunking (though unlikely in this use case)
                 print(f"Large dataset detected ({len(data_to_write)} rows). Writing in optimized batch.")
-            
+
+            # Ensure the grid is big enough - reports are wider now that more products
+            # are tracked, and the tabs were originally created with only 20 columns
+            needed_cols = len(df_copy.columns)
+            needed_rows = len(data_to_write) + 10
+            try:
+                if worksheet.col_count < needed_cols or worksheet.row_count < needed_rows:
+                    self._api_call_with_retry(lambda: worksheet.resize(
+                        rows=max(worksheet.row_count, needed_rows),
+                        cols=max(worksheet.col_count, needed_cols)))
+                    self._add_api_delay(0.3)
+            except Exception as e:
+                print(f"Warning: could not resize worksheet grid: {e}")
+
             self._api_call_with_retry(lambda: worksheet.update(values=data_to_write, range_name='A1'))
             self._add_api_delay(0.3)  # Delay after data write
             
@@ -1020,7 +1064,17 @@ class DiscrepancyAnalyzer:
             
             # Add dropdown validation
             self._add_dropdown_validation(worksheet, df_copy, title)
-            
+
+            # Trim leftover empty columns so the tab ends right at the data
+            # (the grid may be wider from a previous run that had more products)
+            try:
+                final_cols = len(df_copy.columns)
+                if worksheet.col_count > final_cols:
+                    self._api_call_with_retry(lambda: worksheet.resize(
+                        rows=worksheet.row_count, cols=final_cols))
+            except Exception as e:
+                print(f"Warning: could not trim worksheet columns: {e}")
+
             print(f"Successfully updated sheet: {sheet_name}")
             
         except Exception as e:
@@ -1270,10 +1324,8 @@ class DiscrepancyAnalyzer:
                 status_col_index = df.columns.get_loc('Status')
                 resolution_col_index = df.columns.get_loc('Resolution Status') if 'Resolution Status' in df.columns else None
                 
-                # Get percentage column indices
-                bird_pct_col = df.columns.get_loc('Birds Percentage Difference') if 'Birds Percentage Difference' in df.columns else None
-                chicken_pct_col = df.columns.get_loc('Chicken Weight Percentage Difference') if 'Chicken Weight Percentage Difference' in df.columns else None
-                gizzard_pct_col = df.columns.get_loc('Gizzard Weight Percentage Difference') if 'Gizzard Weight Percentage Difference' in df.columns else None
+                # All percentage-difference column indices (birds + every product)
+                pct_col_indices = [i for i, col in enumerate(df.columns) if 'Percentage Difference' in col]
                 
                 for row_idx, row_data in enumerate(df.values, 4):  # Starting from row 5 (index 4)
                     status_value = str(row_data[status_col_index])
@@ -1325,7 +1377,7 @@ class DiscrepancyAnalyzer:
                     loss_penalty_color = {'red': 1.0, 'green': 0.6, 'blue': 0.6}  # Light red for losses
                     gain_penalty_color = {'red': 1.0, 'green': 0.85, 'blue': 0.7}  # Medium peach for gains
 
-                    for pct_col_idx in [bird_pct_col, chicken_pct_col, gizzard_pct_col]:
+                    for pct_col_idx in pct_col_indices:
                         if pct_col_idx is not None:
                             pct_value_str = str(row_data[pct_col_idx])
                             if pct_value_str != 'N/A' and pct_value_str.endswith('%'):
@@ -1377,6 +1429,112 @@ class DiscrepancyAnalyzer:
                 }
             })
 
+            # Monthly Summary: wrap the long product headers and give the weight/birds
+            # columns a comfortable uniform width (Month / Officer / Offtake stay auto)
+            if 'MONTHLY SUMMARY' in title:
+                keep_auto = {'Month', 'Purchase Officer', 'Offtake Count'}
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': header_row_index,
+                            'endRowIndex': header_row_index + 1,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {'wrapStrategy': 'WRAP', 'verticalAlignment': 'MIDDLE'}
+                        },
+                        'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment)'
+                    }
+                })
+                for col_idx, col_name in enumerate(df.columns):
+                    if col_name not in keep_auto:
+                        requests.append({
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': col_idx,
+                                    'endIndex': col_idx + 1
+                                },
+                                'properties': {'pixelSize': 165},
+                                'fields': 'pixelSize'
+                            }
+                        })
+
+            # Weight Discrepancy: same treatment - wrap the headers and give the
+            # birds/weight/percentage columns a comfortable uniform width. The text
+            # and workflow columns (dates, status, comments, resolution) stay auto.
+            if 'DISCREPANCY' in title:
+                keep_auto = {'Date', 'Purchase Officer', 'Status', 'Responsible Party',
+                             'Root Cause', 'Purchase Team Comments', 'Inventory Team Comments',
+                             'Resolution Status', 'Resolution Date'}
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': header_row_index,
+                            'endRowIndex': header_row_index + 1,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {'wrapStrategy': 'WRAP', 'verticalAlignment': 'MIDDLE'}
+                        },
+                        'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment)'
+                    }
+                })
+                for col_idx, col_name in enumerate(df.columns):
+                    if col_name not in keep_auto:
+                        requests.append({
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': col_idx,
+                                    'endIndex': col_idx + 1
+                                },
+                                'properties': {'pixelSize': 165},
+                                'fields': 'pixelSize'
+                            }
+                        })
+
+            # Performance: same treatment - wrap the metric headers and give the
+            # average/total/combined columns a comfortable uniform width
+            # (Purchase Officer and Volume Category stay auto)
+            if 'PERFORMANCE' in title:
+                keep_auto = {'Purchase Officer', 'Volume Category'}
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': header_row_index,
+                            'endRowIndex': header_row_index + 1,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {'wrapStrategy': 'WRAP', 'verticalAlignment': 'MIDDLE'}
+                        },
+                        'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment)'
+                    }
+                })
+                for col_idx, col_name in enumerate(df.columns):
+                    if col_name not in keep_auto:
+                        requests.append({
+                            'updateDimensionProperties': {
+                                'range': {
+                                    'sheetId': worksheet_id,
+                                    'dimension': 'COLUMNS',
+                                    'startIndex': col_idx,
+                                    'endIndex': col_idx + 1
+                                },
+                                'properties': {'pixelSize': 165},
+                                'fields': 'pixelSize'
+                            }
+                        })
+
             # For Purchase Target Tracker, keep every column visible at first glance:
             # wrap the header row and cap data columns at a compact width so long
             # header names stack vertically instead of stretching the sheet.
@@ -1421,6 +1579,22 @@ class DiscrepancyAnalyzer:
             # For Invoice Mismatch Report, wrap every column that holds a long
             # comma-separated invoice list so nothing stretches unreadably wide
             if 'INVOICE MISMATCH' in title:
+                # Wrap the header row so it reads consistently with the other tabs
+                requests.append({
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': worksheet_id,
+                            'startRowIndex': header_row_index,
+                            'endRowIndex': header_row_index + 1,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(df.columns)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {'wrapStrategy': 'WRAP', 'verticalAlignment': 'MIDDLE'}
+                        },
+                        'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment)'
+                    }
+                })
                 long_text_cols = [
                     'Purchase Invoices', 'Inventory Invoices',
                     'Missing in Inventory', 'Extra in Inventory'
@@ -1520,15 +1694,17 @@ class DiscrepancyAnalyzer:
             }
         })
 
-        # Unmerge first so re-runs don't collide with previously merged ranges
+        # Unmerge first so re-runs don't collide with previously merged ranges.
+        # Omit column bounds so this covers the FULL width of these rows - a prior
+        # run may have merged across more columns (e.g. when more products had data),
+        # and a narrower unmerge would only partially cover that merge, which the API
+        # rejects ("must select all cells in a merged range") and aborts all formatting.
         requests.append({
             'unmergeCells': {
                 'range': {
                     'sheetId': worksheet_id,
                     'startRowIndex': header_row_idx,
-                    'endRowIndex': text_end_idx,
-                    'startColumnIndex': 0,
-                    'endColumnIndex': num_columns
+                    'endRowIndex': text_end_idx
                 }
             }
         })
@@ -1824,8 +2000,9 @@ class DiscrepancyAnalyzer:
 
             # New total columns
             total_birds_col = df.columns.get_loc('Total Birds') if 'Total Birds' in df.columns else None
-            total_chicken_col = df.columns.get_loc('Total Chicken Weight (kg)') if 'Total Chicken Weight (kg)' in df.columns else None
-            total_gizzard_col = df.columns.get_loc('Total Gizzard Weight (kg)') if 'Total Gizzard Weight (kg)' in df.columns else None
+            # Every per-product total column (e.g. "Total Chicken Weight (kg)", "Total Head Weight (kg)")
+            product_total_cols = [i for i, col in enumerate(df.columns)
+                                  if col.startswith('Total ') and col.endswith('Weight (kg)')]
             combined_total_col = df.columns.get_loc('Combined Total (kg)') if 'Combined Total (kg)' in df.columns else None
 
             # Metric columns (averages)
@@ -2030,45 +2207,20 @@ class DiscrepancyAnalyzer:
                         }
                     })
 
-                # Special formatting for Total Chicken Weight column
-                if total_chicken_col is not None:
+                # Special formatting for every per-product Total Weight column
+                for col_idx in product_total_cols:
                     requests.append({
                         'repeatCell': {
                             'range': {
                                 'sheetId': worksheet_id,
                                 'startRowIndex': row_idx,
                                 'endRowIndex': row_idx + 1,
-                                'startColumnIndex': total_chicken_col,
-                                'endColumnIndex': total_chicken_col + 1
+                                'startColumnIndex': col_idx,
+                                'endColumnIndex': col_idx + 1
                             },
                             'cell': {
                                 'userEnteredFormat': {
                                     'backgroundColor': perf_colors['total_chicken'],
-                                    'textFormat': {
-                                        'fontSize': 10,
-                                        'bold': True
-                                    },
-                                    'horizontalAlignment': 'CENTER'
-                                }
-                            },
-                            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
-                        }
-                    })
-
-                # Special formatting for Total Gizzard Weight column
-                if total_gizzard_col is not None:
-                    requests.append({
-                        'repeatCell': {
-                            'range': {
-                                'sheetId': worksheet_id,
-                                'startRowIndex': row_idx,
-                                'endRowIndex': row_idx + 1,
-                                'startColumnIndex': total_gizzard_col,
-                                'endColumnIndex': total_gizzard_col + 1
-                            },
-                            'cell': {
-                                'userEnteredFormat': {
-                                    'backgroundColor': perf_colors['total_gizzard'],
                                     'textFormat': {
                                         'fontSize': 10,
                                         'bold': True
@@ -2384,7 +2536,11 @@ class DiscrepancyAnalyzer:
         if purchase_df.empty or inventory_df.empty:
             print("Error: Could not read data from sheets")
             return None, None, None, None, None
-        
+
+        # Only report on products that actually have data (keeps empty columns out)
+        self.active_products = self._compute_active_products(purchase_df, inventory_df)
+        print(f"Products with data (shown in reports): {[p['label'] for p in self.active_products]}")
+
         # Process data
         print("Processing purchase data...")
         purchase_grouped = self.process_purchase_data(purchase_df)
