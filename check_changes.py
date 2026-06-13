@@ -24,9 +24,7 @@ def load_env_file():
                     os.environ[key] = value
 
 def get_credentials():
-    """Get Google API credentials from environment."""
-    load_env_file()
-
+    """Get Google API credentials from environment (caller loads the .env first)."""
     service_account_info = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
     if not service_account_info:
         raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON environment variable not set")
