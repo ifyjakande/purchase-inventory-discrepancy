@@ -31,7 +31,6 @@ PRODUCTS = [
     {'label': 'Gizzard',    'purchase_col': 'PURCHASED GIZZARD WEIGHT',     'inventory_col': 'INVENTORY GIZZARD WEIGHT'},
     {'label': 'Head',       'purchase_col': 'PURCHASED HEAD WEIGHT',        'inventory_col': 'INVENTORY HEAD WEIGHT'},
     {'label': 'Leg',        'purchase_col': 'PURCHASED LEG WEIGHT',         'inventory_col': 'INVENTORY LEG WEIGHT'},
-    {'label': 'Head & Leg', 'purchase_col': 'PURCHASED HEAD & LEG WEIGHT',  'inventory_col': 'INVENTORY HEAD & LEG WEIGHT'},
     {'label': 'Liver',      'purchase_col': 'PURCHASED LIVER WEIGHT',       'inventory_col': 'INVENTORY LIVER WEIGHT'},
     {'label': 'Neck',       'purchase_col': 'PURCHASED NECK WEIGHT',        'inventory_col': 'INVENTORY NECK WEIGHT'},
 ]
