@@ -11,6 +11,9 @@ permissions:
 
 jobs:
   check-changes:
+    # Only scheduled runs use the state file for change detection.
+    # Manual/terminal runs (workflow_dispatch) skip this and always analyze.
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     outputs:
       needs_update: ${{ steps.check.outputs.needs_update }}
@@ -69,7 +72,16 @@ jobs:
 
   analyze-discrepancies:
     needs: check-changes
-    if: always() && needs.check-changes.result == 'success' && needs.check-changes.outputs.needs_update == 'true'
+    # Run on manual dispatch always; on schedule only when source data changed.
+    if: >-
+      always() &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          needs.check-changes.result == 'success' &&
+          needs.check-changes.outputs.needs_update == 'true'
+        )
+      )
     runs-on: ubuntu-latest
 
     steps:
