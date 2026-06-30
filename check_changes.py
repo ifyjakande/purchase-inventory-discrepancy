@@ -162,27 +162,33 @@ def main():
         # Load .env file first
         load_env_file()
 
-        # Get environment variables
+        # Get environment variables.
+        # The officer's only input surface is now the consolidated entry tab (in
+        # the purchase spreadsheet), so we hash that + inventory. We deliberately
+        # do NOT hash 'Pullus Purchase Tracker' / 'Daily Purchase Log' anymore —
+        # those are written by sync_entry_log.py and hashing them would re-trigger
+        # the pipeline off its own output.
         purchase_sheet_id = os.getenv('PURCHASE_SHEET_ID')
         inventory_sheet_id = os.getenv('INVENTORY_SHEET_ID')
-        purchase_sheet_name = os.getenv('PURCHASE_SHEET_NAME', 'Pullus Purchase Tracker')
-        inventory_sheet_name = os.getenv('INVENTORY_SHEET_NAME', 'Pullus Inventory Tracker')
+        # `or default` so an unset secret (empty string in CI) still falls back
+        entry_sheet_name = os.getenv('ENTRY_SHEET_NAME') or 'Purchase Entry Log'
+        inventory_sheet_name = os.getenv('INVENTORY_SHEET_NAME') or 'Pullus Inventory Tracker'
 
         if not purchase_sheet_id or not inventory_sheet_id:
             print("❌ PURCHASE_SHEET_ID and INVENTORY_SHEET_ID environment variables must be set")
             sys.exit(1)
 
         print(f"🔍 Checking for changes in source worksheets:")
-        print(f"  📋 Purchase: '{purchase_sheet_name}'")
+        print(f"  📋 Entry log: '{entry_sheet_name}'")
         print(f"  📋 Inventory: '{inventory_sheet_name}'")
 
         # Get credentials
         credentials = get_credentials()
 
-        # Get current source data hashes
+        # Get current source data hashes (entry tab lives in the purchase sheet)
         current_combined_hash, current_purchase_hash, current_inventory_hash = get_combined_source_hash(
             credentials, purchase_sheet_id, inventory_sheet_id,
-            purchase_sheet_name, inventory_sheet_name
+            entry_sheet_name, inventory_sheet_name
         )
 
         # Load last processed hashes
