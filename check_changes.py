@@ -7,9 +7,11 @@ Uses content hash of both purchase and inventory source worksheets.
 import json
 import os
 import sys
+import time
 import hashlib
 from google.oauth2.service_account import Credentials
 import gspread
+from gspread.utils import fill_gaps
 
 def load_env_file():
     """Load environment variables from .env file if it exists."""
@@ -65,18 +67,27 @@ def get_credentials():
         print(f"❌ Error creating credentials: {e}")
         sys.exit(1)
 
-def get_source_data_hash(spreadsheet_id, credentials, worksheet_name):
-    """Get content hash of a specific worksheet."""
+def api_call_with_backoff(call, *args, **kwargs):
+    """Run a gspread call, retrying 429/500/503 with exponential backoff."""
+    delay = 2
+    for attempt in range(4):
+        try:
+            return call(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
+            if attempt == 3 or status not in (429, 500, 503):
+                raise
+            print(f"API error {status}, retrying in {delay}s...")
+            time.sleep(delay)
+            delay *= 2
+
+def get_source_data_hash(spreadsheet, worksheet_name):
+    """Get content hash of a specific worksheet (single values read)."""
     try:
-        # Use gspread for easier worksheet access
-        gc = gspread.authorize(credentials)
-        spreadsheet = gc.open_by_key(spreadsheet_id)
-
-        # Get the source worksheet
-        source_worksheet = spreadsheet.worksheet(worksheet_name)
-
-        # Get all values from the source worksheet
-        all_values = source_worksheet.get_all_values()
+        # One values_get per tab; pad exactly like get_all_values() so the
+        # hash input (and the stored hashes) stays identical.
+        response = api_call_with_backoff(spreadsheet.values_get, f"'{worksheet_name}'")
+        all_values = fill_gaps(response.get('values', [[]]))
 
         # Create hash of the content
         content_str = str(all_values)
@@ -88,12 +99,10 @@ def get_source_data_hash(spreadsheet_id, credentials, worksheet_name):
 
         return content_hash
 
-    except gspread.WorksheetNotFound:
-        print(f"❌ Source worksheet '{worksheet_name}' not found")
+    except gspread.exceptions.APIError as e:
+        print(f"❌ Error reading worksheet '{worksheet_name}': {e}")
         print("Available worksheets:")
         try:
-            gc = gspread.authorize(credentials)
-            spreadsheet = gc.open_by_key(spreadsheet_id)
             for ws in spreadsheet.worksheets():
                 print(f"  - {ws.title}")
         except Exception:
@@ -108,11 +117,16 @@ def get_combined_source_hash(credentials, purchase_sheet_id, inventory_sheet_id,
     """Get combined hash of both source sheets."""
     print("🔍 Checking both source sheets for changes...")
 
+    # One client, one open per spreadsheet, one values read per tab
+    gc = gspread.authorize(credentials)
+    purchase_spreadsheet = api_call_with_backoff(gc.open_by_key, purchase_sheet_id)
+    inventory_spreadsheet = api_call_with_backoff(gc.open_by_key, inventory_sheet_id)
+
     # Get hash for purchase sheet
-    purchase_hash = get_source_data_hash(purchase_sheet_id, credentials, purchase_sheet_name)
+    purchase_hash = get_source_data_hash(purchase_spreadsheet, purchase_sheet_name)
 
     # Get hash for inventory sheet
-    inventory_hash = get_source_data_hash(inventory_sheet_id, credentials, inventory_sheet_name)
+    inventory_hash = get_source_data_hash(inventory_spreadsheet, inventory_sheet_name)
 
     # Combine both hashes
     combined_content = f"{purchase_hash}|{inventory_hash}"

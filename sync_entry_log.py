@@ -8,6 +8,10 @@ existing tabs so the current pipeline runs unchanged:
 The sync owns every target row on/after CUTOVER and rewrites that block from the
 entry tab each run. Pre-cutover history is never touched. Idempotent.
 """
+import time
+
+import gspread
+
 from entry_log_common import (
     PURCHASE_SHEET_ID, SECONDARY_SHEET_ID,
     ENTRY_TAB, PPT_TAB, DPL_TAB,
@@ -17,11 +21,26 @@ from entry_log_common import (
 )
 
 
-def read_entry_rows(gc):
+def _retry(call, *args, **kwargs):
+    """Run a gspread call, retrying 429/500/503 with exponential backoff."""
+    delay = 2
+    for attempt in range(4):
+        try:
+            return call(*args, **kwargs)
+        except gspread.exceptions.APIError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if attempt == 3 or status not in (429, 500, 503):
+                raise
+            print(f"  API error {status}; retrying in {delay}s...")
+            time.sleep(delay)
+            delay *= 2
+
+
+def read_entry_rows(sh):
     """Return list of dicts {entry_header: native_value} for entry rows with a
     DATE on/after cutover. Read UNFORMATTED so numbers/serials stay native."""
-    ws = gc.open_by_key(PURCHASE_SHEET_ID).worksheet(ENTRY_TAB)
-    vals = ws.get_all_values(value_render_option="UNFORMATTED_VALUE")
+    ws = _retry(sh.worksheet, ENTRY_TAB)
+    vals = _retry(ws.get_all_values, value_render_option="UNFORMATTED_VALUE")
     headers = vals[ENTRY_HEADER_ROW - 1] if len(vals) >= ENTRY_HEADER_ROW else []
     idx = {h: i for i, h in enumerate(headers)}
     date_i = idx.get("DATE")
@@ -54,9 +73,10 @@ def _pad(row, n):
     return row + [""] * (n - len(row))
 
 
-def _sync_target(ws, header_row, target_headers, projected, date_cols, datetime_cols):
+def _sync_target(ws, header_row, target_headers, projected, vals, date_cols, datetime_cols):
     """Reconcile the cutover-onward (>= CUTOVER) block of a target tab from the
-    entry tab, WITHOUT ever touching earlier-month history.
+    entry tab, WITHOUT ever touching earlier-month history. `vals` is the tab's
+    single UNFORMATTED get_all_values read (done once by the caller).
 
     Safety model:
       - Rows dated before CUTOVER are never read for content nor overwritten...
@@ -68,7 +88,6 @@ def _sync_target(ws, header_row, target_headers, projected, date_cols, datetime_
     """
     n_cols = len(target_headers)
     last_col = col_letter(n_cols)
-    vals = ws.get_all_values(value_render_option="UNFORMATTED_VALUE")
 
     date_idx = next(i for i, h in enumerate(target_headers) if h.strip().lower() == "date")
     co = cutover_serial()
@@ -106,8 +125,8 @@ def _sync_target(ws, header_row, target_headers, projected, date_cols, datetime_
     new_block = preserved + projected
     if new_block:
         end = tail_start + len(new_block) - 1
-        ws.update(range_name=f"A{tail_start}:{last_col}{end}",
-                  values=new_block, value_input_option="RAW")
+        _retry(ws.update, range_name=f"A{tail_start}:{last_col}{end}",
+               values=new_block, value_input_option="RAW")
         reqs = []
         for h in date_cols:
             reqs.append(_fmt_req(ws.id, tail_start - 1, end, target_headers.index(h),
@@ -116,13 +135,13 @@ def _sync_target(ws, header_row, target_headers, projected, date_cols, datetime_
             reqs.append(_fmt_req(ws.id, tail_start - 1, end, target_headers.index(h),
                                  "DATE_TIME", "dd-mmm-yyyy hh:mm:ss am/pm"))
         if reqs:
-            ws.spreadsheet.batch_update({"requests": reqs})
+            _retry(ws.spreadsheet.batch_update, {"requests": reqs})
     else:
         end = tail_start - 1
 
     # clear any leftover rows below the rewritten block (shrunk block / removed rows)
     if last_content > end:
-        ws.batch_clear([f"A{end + 1}:{last_col}{last_content}"])
+        _retry(ws.batch_clear, [f"A{end + 1}:{last_col}{last_content}"])
 
     return len(projected), tail_start, end
 
@@ -137,32 +156,34 @@ def _fmt_req(sid, start_row0, end_row1, col0, ftype, pattern):
 
 def main():
     gc = authenticate()
-    entry_rows = read_entry_rows(gc)
+    sh_a = _retry(gc.open_by_key, PURCHASE_SHEET_ID)
+    entry_rows = read_entry_rows(sh_a)
     print(f"Entry tab: {len(entry_rows)} row(s) on/after cutover.")
 
     # --- Sheet A: Pullus Purchase Tracker (identity mapping by name) ---
-    sh_a = gc.open_by_key(PURCHASE_SHEET_ID)
-    ppt = sh_a.worksheet(PPT_TAB)
-    ppt_headers = ppt.get_all_values()[PPT_HEADER_ROW - 1]
+    ppt = _retry(sh_a.worksheet, PPT_TAB)
+    ppt_vals = _retry(ppt.get_all_values, value_render_option="UNFORMATTED_VALUE")
+    ppt_headers = [str(h) for h in ppt_vals[PPT_HEADER_ROW - 1]]
     missing = [h for h in ppt_headers if h not in ENTRY_HEADERS and h.strip()]
     if missing:
         print(f"  note: PPT columns not in entry schema (left blank): {missing}")
     ppt_proj = _project(entry_rows, ppt_headers)
-    n, s, e = _sync_target(ppt, PPT_HEADER_ROW, ppt_headers, ppt_proj,
+    n, s, e = _sync_target(ppt, PPT_HEADER_ROW, ppt_headers, ppt_proj, ppt_vals,
                            date_cols=["DATE"], datetime_cols=[])
     print(f"  '{PPT_TAB}': wrote {n} rows (rows {s}-{e}).")
 
     # --- Sheet B: Daily Purchase Log (renamed mapping) ---
-    sh_b = gc.open_by_key(SECONDARY_SHEET_ID)
-    dpl = sh_b.worksheet(DPL_TAB)
-    dpl_headers = dpl.get_all_values()[DPL_HEADER_ROW - 1]
+    sh_b = _retry(gc.open_by_key, SECONDARY_SHEET_ID)
+    dpl = _retry(sh_b.worksheet, DPL_TAB)
+    dpl_vals = _retry(dpl.get_all_values, value_render_option="UNFORMATTED_VALUE")
+    dpl_headers = [str(h) for h in dpl_vals[DPL_HEADER_ROW - 1]]
     unmapped = [h for h in dpl_headers if h.strip() and h not in DPL_FROM_ENTRY]
     if unmapped:
         print(f"  note: Daily Purchase Log columns with no entry source (left blank): {unmapped}")
     dpl_proj = _project(entry_rows, dpl_headers, DPL_FROM_ENTRY)
     date_cols = [h for h in dpl_headers if h in DPL_DATE_HEADERS]
     dt_cols = [h for h in dpl_headers if h in DPL_DATETIME_HEADERS]
-    n, s, e = _sync_target(dpl, DPL_HEADER_ROW, dpl_headers, dpl_proj,
+    n, s, e = _sync_target(dpl, DPL_HEADER_ROW, dpl_headers, dpl_proj, dpl_vals,
                            date_cols=date_cols, datetime_cols=dt_cols)
     print(f"  '{DPL_TAB}': wrote {n} rows (rows {s}-{e}).")
     print("Sync complete.")
