@@ -57,6 +57,7 @@ ENTRY_COLUMNS = [
     {"name": "LOCATION",                    "kind": "input",   "fmt": "text"},
     {"name": "CLUSTER NAME",                "kind": "input",   "fmt": "text"},
     {"name": "FARMER NAME",                 "kind": "input",   "fmt": "text"},
+    {"name": "PIF FARMER",                  "kind": "input",   "fmt": "text"},
     {"name": "FARMER ID",                   "kind": "input",   "fmt": "text"},
     {"name": "FARMER PHONE",                "kind": "input",   "fmt": "text"},
     # --- birds bought ---
@@ -98,9 +99,13 @@ ENTRY_HEADERS = [c["name"] for c in ENTRY_COLUMNS]
 
 # Yes/No dropdown columns.
 ENTRY_YESNO_COLS = [
-    "MINI BOUGHT AT STANDARD RATE", "OFFTAKE REQUESTED VIA APP",
+    "PIF FARMER", "MINI BOUGHT AT STANDARD RATE", "OFFTAKE REQUESTED VIA APP",
     "COMPLETED ON APP", "FAILED OFFTAKE",
 ]
+
+# Entry-tab-only columns: captured for reporting but deliberately NOT projected
+# into either target tab (neither has a matching column).
+ENTRY_ONLY_COLS = {"PIF FARMER"}
 
 # --- Sheet B ("Daily Purchase Log") header -> entry column ------------------
 # Drives the projection onto Sheet B; chicken/gizzard get renamed back to B's

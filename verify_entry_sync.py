@@ -6,7 +6,7 @@ from entry_log_common import (
     PURCHASE_SHEET_ID, SECONDARY_SHEET_ID,
     ENTRY_TAB, PPT_TAB, DPL_TAB,
     ENTRY_HEADER_ROW, PPT_HEADER_ROW, DPL_HEADER_ROW,
-    ENTRY_COLUMNS, ENTRY_HEADERS, DPL_FROM_ENTRY,
+    ENTRY_COLUMNS, ENTRY_HEADERS, ENTRY_ONLY_COLS, DPL_FROM_ENTRY,
     authenticate, cutover_serial, row_date_serial, is_blank,
 )
 
@@ -46,7 +46,7 @@ def main():
     dpl_ws = gc.open_by_key(SECONDARY_SHEET_ID).worksheet(DPL_TAB)
     dpl_headers, dpl_rows = managed_block(dpl_ws, DPL_HEADER_ROW)
 
-    sink = set(ppt_headers) | set(DPL_FROM_ENTRY.values())
+    sink = set(ppt_headers) | set(DPL_FROM_ENTRY.values()) | ENTRY_ONLY_COLS
     dropped = [c for c in ENTRY_INPUTS if c not in sink]
     if dropped:
         fails.append(f"entry input columns not mapped to any target: {dropped}")
