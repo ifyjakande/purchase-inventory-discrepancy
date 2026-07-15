@@ -180,7 +180,6 @@ def create_entry_tab(gc):
     sh = gc.open_by_key(PURCHASE_SHEET_ID)
     n_cols = len(ENTRY_HEADERS)
     ws = get_or_create(sh, ENTRY_TAB, LAST_DATA_ROW, n_cols)
-    sid = ws.id
     last_col = col_letter(n_cols)
     letters = name_to_letter()
 
@@ -209,13 +208,12 @@ def create_entry_tab(gc):
     ws.batch_update(value_ranges, value_input_option="USER_ENTERED")
 
     dropdowns = build_dropdown_lists(gc)
-    _format_entry_tab(sh, ws, n_cols, letters, dropdowns)
+    _format_entry_tab(sh, ws, n_cols, dropdowns)
     return ws
 
 
-def _format_entry_tab(sh, ws, n_cols, letters, dropdowns):
+def _format_entry_tab(sh, ws, n_cols, dropdowns):
     sid = ws.id
-    data_start, data_end = ENTRY_HEADER_ROW, LAST_DATA_ROW  # 0-indexed start handled below
     reqs = []
 
     # merge + style title / legend
