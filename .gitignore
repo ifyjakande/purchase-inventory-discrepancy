@@ -2,6 +2,9 @@
 *.json
 pullus-pipeline-*.json
 
+# shared claude code settings are safe to track (creds stay ignored above)
+!.claude/settings.json
+
 # OS files
 .DS_Store
 

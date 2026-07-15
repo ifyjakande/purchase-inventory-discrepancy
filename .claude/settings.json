@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(python setup_entry_tab.py:*)",
+      "Bash(python3 setup_entry_tab.py:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -e '.tool_input.command | test(\"setup_entry_tab\")' >/dev/null 2>&1 && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"setup_entry_tab.py rebuilds (and can wipe) the live Purchase Entry Log - requires explicit user approval\"}}' || true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -4,7 +4,12 @@
 Usage:
     python setup_entry_tab.py            # create / rebuild the entry tab
     python setup_entry_tab.py --widen    # also widen scorecard ranges + grow DPL
-Re-running is safe; it rebuilds the entry tab layout without touching data tabs.
+    python setup_entry_tab.py --force    # rebuild even if the tab holds data
+
+WARNING: a rebuild CLEARS the entry tab, including any officer data logged since
+cutover. If the tab has data rows the script refuses to run without --force;
+back the rows up first (they are also mirrored in the two target tabs by the
+sync, but only rows >= CUTOVER). It never touches the data tabs themselves.
 """
 import re
 import sys
@@ -176,9 +181,22 @@ def get_or_create(sh, title, rows, cols):
     return ws
 
 
-def create_entry_tab(gc):
+def create_entry_tab(gc, force=False):
     sh = gc.open_by_key(PURCHASE_SHEET_ID)
     n_cols = len(ENTRY_HEADERS)
+
+    # A rebuild clears the tab, so refuse to destroy live officer data.
+    try:
+        existing = sh.worksheet(ENTRY_TAB)
+        vals = existing.get_all_values()
+        n_data = sum(1 for r in vals[ENTRY_HEADER_ROW:] if any(c.strip() for c in r))
+        if n_data and not force:
+            raise SystemExit(
+                f"ABORTED: '{ENTRY_TAB}' holds {n_data} data row(s); rebuilding would "
+                f"erase them. Back them up, then re-run with --force.")
+    except gspread.WorksheetNotFound:
+        pass
+
     ws = get_or_create(sh, ENTRY_TAB, LAST_DATA_ROW, n_cols)
     last_col = col_letter(n_cols)
     letters = name_to_letter()
@@ -333,7 +351,7 @@ def widen_scorecards(gc):
 def main():
     gc = authenticate()
     print(f"Creating entry tab '{ENTRY_TAB}'...")
-    ws = create_entry_tab(gc)
+    ws = create_entry_tab(gc, force="--force" in sys.argv)
     print(f"  done: https://docs.google.com/spreadsheets/d/{PURCHASE_SHEET_ID}/edit#gid={ws.id}")
     if "--widen" in sys.argv:
         print("Widening Monthly Scorecards ranges...")
